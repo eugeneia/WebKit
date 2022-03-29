@@ -1856,6 +1856,10 @@ bool AccessibilityObject::dependsOnTextUnderElement() const
     case AccessibilityRole::RadioButton:
     case AccessibilityRole::Switch:
     case AccessibilityRole::Tab:
+    case AccessibilityRole::Generic:
+    case AccessibilityRole::Cell:
+    case AccessibilityRole::GridCell:
+    case AccessibilityRole::Caption:
         return true;
     default:
         break;
