@@ -1583,15 +1583,38 @@ void FrameLoader::loadURL(FrameLoadRequest&& frameLoadRequest, const String& ref
 
         if (!dispatchNavigateEvent(newURL, newLoadType, action, historyHandling, true))
             return;
+        static bool keepNavigationOnFragmentLoad = false;
+        static bool keepNavigationOnFragmentLoadInitialized = false;
+
+        if (!keepNavigationOnFragmentLoadInitialized) {
+            keepNavigationOnFragmentLoad = !!getenv("WPE_KEEP_NAVIGATION_ON_FRAGMENT_LOAD");
+            keepNavigationOnFragmentLoadInitialized = true;
+        }
 
         oldDocumentLoader->setTriggeringAction(WTFMove(action));
         oldDocumentLoader->setLastCheckedRequest(ResourceRequest());
-        policyChecker().stopCheck();
+        auto loadType = policyChecker().loadType();
+        bool resetLoadTypeAfterFragmentNavigation = false;
+        if (keepNavigationOnFragmentLoad && ((m_policyDocumentLoader && !equalIgnoringFragmentIdentifier(m_policyDocumentLoader->request().url(), frameLoadRequest.resourceRequest().url())) || (m_provisionalDocumentLoader && !equalIgnoringFragmentIdentifier(m_provisionalDocumentLoader->request().url(), frameLoadRequest.resourceRequest().url())))) {
+            resetLoadTypeAfterFragmentNavigation = true;
+
+            const auto fragmentNavigationURL = frameLoadRequest.resourceRequest().url();
+            const auto navigationURL = m_policyDocumentLoader ? m_policyDocumentLoader->request().url(): m_provisionalDocumentLoader->request().url();
+            FRAMELOADER_RELEASE_LOG(ResourceLoading, "loadURL: navigation to: %s will be continued after fragment navigation to url: %s",
+                navigationURL.string().utf8().data(), fragmentNavigationURL.string().utf8().data());
+        } else {
+            policyChecker().stopCheck();
+        }
+
         policyChecker().setLoadType(newLoadType);
         RELEASE_ASSERT(!isBackForwardLoadType(newLoadType) || frame->history().provisionalItem());
         policyChecker().checkNavigationPolicy(WTFMove(request), ResourceResponse { } /* redirectResponse */, oldDocumentLoader.get(), WTFMove(formState), [this, frame, requesterOrigin = Ref { frameLoadRequest.requesterSecurityOrigin() }, historyHandling] (const ResourceRequest& request, WeakPtr<FormState>&&, NavigationPolicyDecision navigationPolicyDecision) {
             continueFragmentScrollAfterNavigationPolicy(request, requesterOrigin.ptr(), navigationPolicyDecision == NavigationPolicyDecision::ContinueLoad, historyHandling);
         }, PolicyDecisionMode::Synchronous);
+
+        if (resetLoadTypeAfterFragmentNavigation)
+            policyChecker().setLoadType(loadType);
+
         return;
     }
 
@@ -3603,8 +3626,16 @@ void FrameLoader::continueFragmentScrollAfterNavigationPolicy(const ResourceRequ
     // frame to be deallocated.
     Ref frame = m_frame.get();
 
+    static bool keepNavigationOnFragmentLoad = false;
+    static bool keepNavigationOnFragmentLoadInitialized = false;
+
+    if (!keepNavigationOnFragmentLoadInitialized) {
+        keepNavigationOnFragmentLoad = !!getenv("WPE_KEEP_NAVIGATION_ON_FRAGMENT_LOAD");
+        keepNavigationOnFragmentLoadInitialized = true;
+    }
+
     // If we have a provisional request for a different document, a fragment scroll should cancel it.
-    if (m_provisionalDocumentLoader && !equalIgnoringFragmentIdentifier(m_provisionalDocumentLoader->request().url(), request.url())) {
+    if (m_provisionalDocumentLoader && !equalIgnoringFragmentIdentifier(m_provisionalDocumentLoader->request().url(), request.url()) && !keepNavigationOnFragmentLoad) {
         protectedProvisionalDocumentLoader()->stopLoading();
         FRAMELOADER_RELEASE_LOG(ResourceLoading, "continueFragmentScrollAfterNavigationPolicy: Clearing provisional document loader (m_provisionalDocumentLoader=%p)", m_provisionalDocumentLoader.get());
         setProvisionalDocumentLoader(nullptr);
