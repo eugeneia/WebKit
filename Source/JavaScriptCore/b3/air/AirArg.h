@@ -1304,7 +1304,7 @@ public:
     template<typename Int, typename = Value::IsLegalOffset<Int>>
     static bool isValidAddrForm(Air::Opcode opcode, Int offset, std::optional<Width> width = std::nullopt)
     {
-#if !CPU(ARM_THUM2)
+#if !CPU(ARM_THUMB2)
         UNUSED_PARAM(opcode);
 #endif
         if (isX86())

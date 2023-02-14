@@ -147,6 +147,12 @@ static ALWAYS_INLINE CCallHelpers::Address callFrameAddr(Air::Opcode opcode, CCa
 {
     if (isX86()) {
         ASSERT(Arg::addr(Air::Tmp(GPRInfo::callFrameRegister), offsetFromFP).isValidForm(Move, Width64));
+        return CCallHelpers::Address(GPRInfo::callFrameRegister, offsetFromFP);
+    }
+
+    if (isARM64()) {
+        // For ARM64 we solve address materialization in the macro assembler.
+        return CCallHelpers::Address(GPRInfo::callFrameRegister, offsetFromFP);
     }
 
     auto addr = Arg::addr(Air::Tmp(GPRInfo::callFrameRegister), offsetFromFP);
@@ -179,7 +185,7 @@ ALWAYS_INLINE void GenerateAndAllocateRegisters::flush(Tmp tmp, Reg reg)
         m_jit->storeRegWord(reg.gpr(), callFrameAddr(Air::Move, *m_jit, offset));
     else if (B3::conservativeRegisterBytes(B3::FP) == sizeof(double) || !m_code.usesSIMD()) {
         ASSERT(m_map[tmp].spillSlot->byteSize() == bytesForWidth(Width64));
-        m_jit->storeDouble(reg.fpr(), callFrameAddr(Air::Move, *m_jit, offset));
+        m_jit->storeDouble(reg.fpr(), callFrameAddr(Air::MoveDouble, *m_jit, offset));
     } else {
         ASSERT(m_map[tmp].spillSlot->byteSize() == bytesForWidth(Width128));
         m_jit->storeVector(reg.fpr(), callFrameAddr(Air::MoveDouble, *m_jit, offset));
@@ -492,7 +498,11 @@ void GenerateAndAllocateRegisters::generate(CCallHelpers& jit)
 
     CompilerTimingScope timingScope("Air", "GenerateAndAllocateRegisters::generate");
 
+#if !CPU(ARM64)
+    // On ARM64, we still rely on the macro assembler to handle large immediates.
+    // On other platforms, we can use the macro scratch registers.
     DisallowMacroScratchRegisterUsage disallowScratch(*m_jit);
+#endif
 
     buildLiveRanges(*m_liveness);
 
@@ -828,6 +838,7 @@ void GenerateAndAllocateRegisters::generate(CCallHelpers& jit)
                             arg = Arg::addr(Tmp(GPRInfo::callFrameRegister), entry.spillSlot->offsetFromFP());
                         }
                     });
+#if CPU(ARM_THUMB2)
                     int pinnedRegisterUses = 0;
                     inst.forEachArg([&] (Arg& arg, Arg::Role role, Bank, Width) {
                         if (arg.isAddr() && arg.isAnyUse(role) && !arg.isValidForm(inst.kind.opcode)) {
@@ -840,6 +851,7 @@ void GenerateAndAllocateRegisters::generate(CCallHelpers& jit)
                             return;
                         }
                     });
+#endif // CPU(ARM_THUMB2)
                     --instIndex;
                     isReplayingSameInst = true;
                     continue;

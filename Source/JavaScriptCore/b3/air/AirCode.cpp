@@ -88,7 +88,14 @@ Code::Code(Procedure& proc)
                     all.remove(reg);
             }
 #endif
+#if CPU(ARM64)
+            // FIXME https://bugs.webkit.org/show_bug.cgi?id=243890
+            // Our use of DisallowMacroScratchRegisterUsage is not quite right, so for now...
+            all.exclude(RegisterSetBuilder::macroClobberedRegisters());
+#endif // CPU(ARM64)
+#if CPU(ARM_THUMB2)
             all.remove(MacroAssembler::fpTempRegister);
+#endif // CPU(ARM_THUMB2)
 #endif // CPU(ARM)
             auto calleeSave = RegisterSetBuilder::calleeSaveRegisters();
             all.buildAndValidate().forEach(
