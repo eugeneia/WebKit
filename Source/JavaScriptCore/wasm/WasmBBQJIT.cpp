@@ -518,6 +518,20 @@ public:
             return m_i32;
         }
 
+#if USE(JSVALUE32_64)
+        ALWAYS_INLINE int32_t asI64hi() const
+        {
+            ASSERT(m_kind == Const);
+            return m_i32_pair.hi;
+        }
+
+        ALWAYS_INLINE int32_t asI64lo() const
+        {
+            ASSERT(m_kind == Const);
+            return m_i32_pair.lo;
+        }
+#endif
+
         ALWAYS_INLINE int64_t asI64() const
         {
             ASSERT(m_kind == Const);
@@ -689,6 +703,9 @@ public:
     private:
         union {
             int32_t m_i32;
+#if USE(JSVALUE32_64)
+            struct { int32_t lo, hi; } m_i32_pair;
+#endif
             int64_t m_i64;
             float m_f32;
             double m_f64;
@@ -857,6 +874,21 @@ public:
                     return Location::fromFPR(reg.fpr());
                 }
                 default:
+#if USE(JSVALUE32_64)
+                    if (typeNeedsGPR2(type)) {
+                        auto next = remainingGPRs.begin();
+                        if (next != remainingGPRs.end()) {
+                            auto lo = (*next);
+                            if (++next != remainingGPRs.end()) {
+                                auto hi = (*next);
+                                remainingGPRs.remove(lo);
+                                remainingGPRs.remove(hi);
+                                return Location::fromGPR2(hi.gpr(), lo.gpr());
+                            }
+                        }
+                        return generator.canonicalSlot(Value::fromTemp(type, this->enclosedHeight() + i));
+                    }
+#endif
                     if (remainingGPRs.isEmpty())
                         return generator.canonicalSlot(Value::fromTemp(type, this->enclosedHeight() + i));
                     auto reg = *remainingGPRs.begin();
@@ -1497,7 +1529,11 @@ public:
 
     Value instanceValue()
     {
+#if CPU(ARM64) || CPU(X86_64)
         return Value::pinned(TypeKind::I64, Location::fromGPR(GPRInfo::wasmContextInstancePointer));
+#elif CPU(ARM)
+        return Value::pinned(TypeKind::I32, Location::fromGPR(GPRInfo::wasmContextInstancePointer));
+#endif
     }
 
     // Tables
@@ -1518,7 +1554,13 @@ public:
 
         LOG_INSTRUCTION("TableGet", tableIndex, index, RESULT(result));
 
+    #if USE(JSVALUE64)
         throwExceptionIf(ExceptionType::OutOfBoundsTableAccess, m_jit.branchTest64(ResultCondition::Zero, resultLocation.asGPR()));
+    #elif USE(JSVALUE32_64)
+        m_jit.or32(resultLocation.asGPRhi(), resultLocation.asGPRlo(), wasmScratchGPR);
+        throwExceptionIf(ExceptionType::OutOfBoundsTableAccess, m_jit.branchTest32(ResultCondition::Zero, wasmScratchGPR));
+    #endif
+        
         return { };
     }
 
@@ -1725,7 +1767,11 @@ public:
                 m_jit.load32(Address(wasmScratchGPR), resultLocation.asGPR());
                 break;
             case TypeKind::I64:
+#if USE(JSVALUE64)
                 m_jit.load64(Address(wasmScratchGPR), resultLocation.asGPR());
+#elif USE(JSVALUE32_64)
+                m_jit.loadPair32(Address(wasmScratchGPR), resultLocation.asGPRlo(), resultLocation.asGPRhi());
+#endif
                 break;
             case TypeKind::F32:
                 m_jit.loadFloat(Address(wasmScratchGPR), resultLocation.asFPR());
@@ -1750,7 +1796,11 @@ public:
             case TypeKind::Eqref:
             case TypeKind::Anyref:
             case TypeKind::Nullref:
+#if USE(JSVALUE64)
                 m_jit.load64(Address(wasmScratchGPR), resultLocation.asGPR());
+#elif USE(JSVALUE32_64)
+                m_jit.loadPair32(Address(wasmScratchGPR), resultLocation.asGPRlo(), resultLocation.asGPRhi());
+#endif
                 break;
             case TypeKind::Void:
                 break;
@@ -1840,7 +1890,11 @@ public:
                 m_jit.store32(valueLocation.asGPR(), Address(wasmScratchGPR));
                 break;
             case TypeKind::I64:
+#if USE(JSVALUE64)
                 m_jit.store64(valueLocation.asGPR(), Address(wasmScratchGPR));
+#elif USE(JSVALUE32_64)
+                m_jit.storePair32(valueLocation.asGPRlo(), valueLocation.asGPRhi(), Address(wasmScratchGPR));
+#endif
                 break;
             case TypeKind::F32:
                 m_jit.storeFloat(valueLocation.asFPR(), Address(wasmScratchGPR));
@@ -1865,7 +1919,11 @@ public:
             case TypeKind::Eqref:
             case TypeKind::Anyref:
             case TypeKind::Nullref:
+#if USE(JSVALUE64)
                 m_jit.store64(valueLocation.asGPR(), Address(wasmScratchGPR));
+#elif USE(JSVALUE32_64)
+                m_jit.storePair32(valueLocation.asGPRlo(), valueLocation.asGPRhi(), Address(wasmScratchGPR));
+#endif
                 break;
             case TypeKind::Void:
                 break;
@@ -2155,40 +2213,74 @@ public:
                     m_jit.load8SignedExtendTo32(location, resultLocation.asGPR());
                     break;
                 case LoadOpType::I64Load8S:
+#if USE(JSVALUE64)
                     m_jit.load8SignedExtendTo32(location, resultLocation.asGPR());
                     m_jit.signExtend32To64(resultLocation.asGPR(), resultLocation.asGPR());
+#elif USE(JSVALUE32_64)
+                    m_jit.load8SignedExtendTo32(location, resultLocation.asGPRlo());
+                    m_jit.rshift32(resultLocation.asGPRlo(), TrustedImm32(31), resultLocation.asGPRhi());
+#endif
                     break;
                 case LoadOpType::I32Load8U:
                     m_jit.load8(location, resultLocation.asGPR());
                     break;
                 case LoadOpType::I64Load8U:
+#if USE(JSVALUE64)
                     m_jit.load8(location, resultLocation.asGPR());
+#elif USE(JSVALUE32_64)
+                    m_jit.load8(location, resultLocation.asGPRlo());
+                    m_jit.xor32(resultLocation.asGPRhi(), resultLocation.asGPRhi());
+#endif
                     break;
                 case LoadOpType::I32Load16S:
                     m_jit.load16SignedExtendTo32(location, resultLocation.asGPR());
                     break;
                 case LoadOpType::I64Load16S:
+#if USE(JSVALUE64)
                     m_jit.load16SignedExtendTo32(location, resultLocation.asGPR());
                     m_jit.signExtend32To64(resultLocation.asGPR(), resultLocation.asGPR());
+#elif USE(JSVALUE32_64)
+                    m_jit.load16SignedExtendTo32(location, resultLocation.asGPRlo());
+                    m_jit.rshift32(resultLocation.asGPRlo(), TrustedImm32(31), resultLocation.asGPRhi());
+#endif
                     break;
                 case LoadOpType::I32Load16U:
                     m_jit.load16(location, resultLocation.asGPR());
                     break;
                 case LoadOpType::I64Load16U:
+#if USE(JSVALUE64)
                     m_jit.load16(location, resultLocation.asGPR());
+#elif USE(JSVALUE32_64)
+                    m_jit.load16(location, resultLocation.asGPRlo());
+                    m_jit.xor32(resultLocation.asGPRhi(), resultLocation.asGPRhi());
+#endif
                     break;
                 case LoadOpType::I32Load:
                     m_jit.load32(location, resultLocation.asGPR());
                     break;
                 case LoadOpType::I64Load32U:
+#if USE(JSVALUE64)
                     m_jit.load32(location, resultLocation.asGPR());
+#elif USE(JSVALUE32_64)
+                    m_jit.load32(location, resultLocation.asGPRlo());
+                    m_jit.xor32(resultLocation.asGPRhi(), resultLocation.asGPRhi());
+#endif
                     break;
                 case LoadOpType::I64Load32S:
+#if USE(JSVALUE64)
                     m_jit.load32(location, resultLocation.asGPR());
                     m_jit.signExtend32To64(resultLocation.asGPR(), resultLocation.asGPR());
+#elif USE(JSVALUE32_64)
+                    m_jit.load32(location, resultLocation.asGPRlo());
+                    m_jit.rshift32(resultLocation.asGPRlo(), TrustedImm32(31), resultLocation.asGPRhi());
+#endif
                     break;
                 case LoadOpType::I64Load:
+#if USE(JSVALUE64)
                     m_jit.load64(location, resultLocation.asGPR());
+#elif USE(JSVALUE32_64)
+                    m_jit.loadPair32(location, resultLocation.asGPRlo(), resultLocation.asGPRhi());
+#endif
                     break;
                 case LoadOpType::F32Load:
                     m_jit.loadFloat(location, resultLocation.asFPR());
@@ -2248,6 +2340,12 @@ public:
                     ScratchScope<0, 1> scratches(*this);
                     valueLocation = Location::fromFPR(scratches.fpr(0));
                     emitMoveConst(value, valueLocation);
+#if USE(JSVALUE32_64)
+                } else if (value.isConst() && typeNeedsGPR2(value.type())) {
+                    ScratchScope<2, 0> scratches(*this);
+                    valueLocation = Location::fromGPR2(scratches.gpr(1), scratches.gpr(0));
+                    emitMoveConst(value, valueLocation);
+#endif
                 } else if (value.isConst()) {
                     ScratchScope<1, 0> scratches(*this);
                     valueLocation = Location::fromGPR(scratches.gpr(0));
@@ -2261,19 +2359,35 @@ public:
 
                 switch (storeOp) {
                 case StoreOpType::I64Store8:
+#if USE(JSVALUE32_64)
+                    m_jit.store8(valueLocation.asGPRlo(), location);
+                    return;
+#endif
                 case StoreOpType::I32Store8:
                     m_jit.store8(valueLocation.asGPR(), location);
                     return;
                 case StoreOpType::I64Store16:
+#if USE(JSVALUE32_64)
+                    m_jit.store16(valueLocation.asGPRlo(), location);
+                    return;
+#endif
                 case StoreOpType::I32Store16:
                     m_jit.store16(valueLocation.asGPR(), location);
                     return;
                 case StoreOpType::I64Store32:
+#if USE(JSVALUE32_64)
+                    m_jit.store32(valueLocation.asGPRlo(), location);
+                    return;
+#endif
                 case StoreOpType::I32Store:
                     m_jit.store32(valueLocation.asGPR(), location);
                     return;
                 case StoreOpType::I64Store:
+#if USE(JSVALUE64)
                     m_jit.store64(valueLocation.asGPR(), location);
+#elif USE(JSVALUE32_64)
+                    m_jit.storePair32(valueLocation.asGPRlo(), valueLocation.asGPRhi(), location);
+#endif
                     return;
                 case StoreOpType::F32Store:
                     m_jit.storeFloat(valueLocation.asFPR(), location);
@@ -7290,7 +7404,15 @@ public:
             auto type = signature.as<FunctionSignature>()->argumentType(i);
             Location paramLocation = Location::fromArgumentLocation(callInfo.params[i], type.kind);
             if (paramLocation.isRegister()) {
-                RegisterBinding binding = paramLocation.isGPR() ? m_gprBindings[paramLocation.asGPR()] : m_fprBindings[paramLocation.asFPR()];
+                RegisterBinding binding;
+                if (paramLocation.isGPR())
+                    binding = m_gprBindings[paramLocation.asGPR()];
+                else if (paramLocation.isFPR())
+                    binding = m_fprBindings[paramLocation.asFPR()];
+#if USE(JSVALUE32_64)
+                else if (paramLocation.isGPR2())
+                    binding = m_gprBindings[paramLocation.asGPRhi()];
+#endif
                 if (!binding.toValue().isNone())
                     flushValue(binding.toValue());
             }
@@ -7323,7 +7445,15 @@ public:
             Value result = Value::fromTemp(functionType.returnType(i).kind, currentControlData().enclosedHeight() + currentControlData().implicitSlots() + m_parser->expressionStack().size() + i);
             Location returnLocation = Location::fromArgumentLocation(callInfo.results[i], result.type());
             if (returnLocation.isRegister()) {
-                RegisterBinding& currentBinding = returnLocation.isGPR() ? m_gprBindings[returnLocation.asGPR()] : m_fprBindings[returnLocation.asFPR()];
+                RegisterBinding currentBinding;
+                if (returnLocation.isGPR())
+                    currentBinding = m_gprBindings[returnLocation.asGPR()];
+                else if (returnLocation.isFPR())
+                    currentBinding = m_fprBindings[returnLocation.asFPR()];
+#if USE(JSVALUE32_64)
+                else if (returnLocation.isGPR2())
+                    currentBinding = m_gprBindings[returnLocation.asGPRhi()];
+#endif
                 if (currentBinding.isScratch()) {
                     // FIXME: This is a total hack and could cause problems. We assume scratch registers (allocated by a ScratchScope)
                     // will never be live across a call. So far, this is probably true, but it's fragile. Probably the fix here is to
@@ -7332,6 +7462,13 @@ public:
                     if (returnLocation.isGPR()) {
                         ASSERT(m_validGPRs.contains(returnLocation.asGPR(), IgnoreVectors));
                         m_gprSet.add(returnLocation.asGPR(), IgnoreVectors);
+#if USE(JSVALUE32_64)
+                    } else if (returnLocation.isGPR2()) {
+                        ASSERT(m_validGPRs.contains(returnLocation.asGPRlo(), IgnoreVectors));
+                        ASSERT(m_validGPRs.contains(returnLocation.asGPRhi(), IgnoreVectors));
+                        m_gprSet.add(returnLocation.asGPRlo(), IgnoreVectors);
+                        m_gprSet.add(returnLocation.asGPRhi(), IgnoreVectors);
+#endif
                     } else {
                         ASSERT(m_validFPRs.contains(returnLocation.asFPR(), Width::Width128));
                         m_fprSet.add(returnLocation.asFPR(), Width::Width128);
@@ -7404,15 +7541,19 @@ public:
         result = Value::fromTemp(returnType, currentControlData().enclosedHeight() + currentControlData().implicitSlots() + m_parser->expressionStack().size());
         Location resultLocation;
         switch (returnType) {
-        case TypeKind::I32:
-        case TypeKind::I31ref:
         case TypeKind::I64:
-        case TypeKind::Ref:
-        case TypeKind::RefNull:
-        case TypeKind::Arrayref:
-        case TypeKind::Structref:
         case TypeKind::Funcref:
         case TypeKind::Externref:
+        case TypeKind::RefNull:
+        case TypeKind::Ref:
+#if USE(JSVALUE32_64)
+            resultLocation = Location::fromGPR2(GPRInfo::returnValueGPR2, GPRInfo::returnValueGPR);
+            break;
+#endif
+        case TypeKind::I32:
+        case TypeKind::I31ref:
+        case TypeKind::Arrayref:
+        case TypeKind::Structref:
         case TypeKind::Eqref:
         case TypeKind::Anyref:
         case TypeKind::Nullref:
@@ -7441,7 +7582,15 @@ public:
             break;
         }
 
-        RegisterBinding& currentBinding = resultLocation.isGPR() ? m_gprBindings[resultLocation.asGPR()] : m_fprBindings[resultLocation.asFPR()];
+        RegisterBinding currentBinding;
+        if (resultLocation.isGPR())
+            currentBinding = m_gprBindings[resultLocation.asGPR()];
+        else if (resultLocation.isFPR())
+            currentBinding = m_fprBindings[resultLocation.asFPR()];
+#if USE(JSVALUE32_64)
+        else if (resultLocation.isGPR2())
+            currentBinding = m_gprBindings[resultLocation.asGPRhi()]; 
+#endif
         RELEASE_ASSERT(!currentBinding.isScratch());
 
         bind(result, resultLocation);
@@ -8737,7 +8886,11 @@ private:
             break;
         case TypeKind::I64:
         case TypeKind::F64:
+#if USE(JSVALUE64)
             m_jit.store64(Imm64(constant.asI64()), loc.asAddress());
+#elif USE(JSVALUE32_64)
+            m_jit.storePair32(TrustedImm32(constant.asI64lo()), TrustedImm32(constant.asI64hi()), loc.asAddress());
+#endif
             break;
         default:
             RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("Unimplemented constant typekind.");
@@ -8763,7 +8916,12 @@ private:
             m_jit.move(Imm32(constant.asI32()), loc.asGPR());
             break;
         case TypeKind::I64:
+#if USE(JSVALUE64)
             m_jit.move(Imm64(constant.asI64()), loc.asGPR());
+#elif USE(JSVALUE32_64)
+            m_jit.move(Imm32(constant.asI64hi()), loc.asGPRhi());
+            m_jit.move(Imm32(constant.asI64lo()), loc.asGPRlo());
+#endif
             break;
         case TypeKind::Ref:
         case TypeKind::Funcref:
@@ -8777,10 +8935,18 @@ private:
             m_jit.move(TrustedImmPtr(constant.asRef()), loc.asGPR());
             break;
         case TypeKind::F32:
+#if USE(JSVALUE64)
             m_jit.moveFloat(Imm32(constant.asI32()), loc.asFPR());
+#elif USE(JSVALUE32_64)
+            RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-068\n");
+#endif
             break;
         case TypeKind::F64:
+#if USE(JSVALUE64)
             m_jit.moveDouble(Imm64(constant.asI64()), loc.asFPR());
+#elif USE(JSVALUE32_64)
+            RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-069\n");
+#endif
             break;
         default:
             RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("Unimplemented constant typekind.");
@@ -8799,7 +8965,11 @@ private:
             m_jit.store32(src.asGPR(), dst.asAddress());
             break;
         case TypeKind::I64:
+#if USE(JSVALUE64)
             m_jit.store64(src.asGPR(), dst.asAddress());
+#elif USE(JSVALUE32_64)
+            m_jit.storePair32(src.asGPRlo(), src.asGPRhi(), dst.asAddress());
+#endif
             break;
         case TypeKind::F32:
             m_jit.storeFloat(src.asFPR(), dst.asAddress());
@@ -8816,7 +8986,11 @@ private:
         case TypeKind::Eqref:
         case TypeKind::Anyref:
         case TypeKind::Nullref:
+#if USE(JSVALUE64)
             m_jit.store64(src.asGPR(), dst.asAddress());
+#elif USE(JSVALUE32_64)
+            RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-070\n");
+#endif
             break;
         case TypeKind::V128:
             m_jit.storeVector(src.asFPR(), dst.asAddress());
@@ -8850,7 +9024,11 @@ private:
             m_jit.transfer32(src.asAddress(), dst.asAddress());
             break;
         case TypeKind::I64:
+#if USE(JSVALUE64)
             m_jit.transfer64(src.asAddress(), dst.asAddress());
+#elif USE(JSVALUE32_64)
+            RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-065\n");
+#endif
             break;
         case TypeKind::F64:
             m_jit.loadDouble(src.asAddress(), wasmScratchFPR);
@@ -8865,7 +9043,11 @@ private:
         case TypeKind::Eqref:
         case TypeKind::Anyref:
         case TypeKind::Nullref:
+#if USE(JSVALUE64)
             m_jit.transfer64(src.asAddress(), dst.asAddress());
+#elif USE(JSVALUE32_64)
+            RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-072\n");
+#endif
             break;
         case TypeKind::V128: {
             Address srcAddress = src.asAddress();
@@ -8894,14 +9076,20 @@ private:
             return;
 
         switch (type) {
-        case TypeKind::I32:
-        case TypeKind::I31ref:
         case TypeKind::I64:
         case TypeKind::Externref:
         case TypeKind::Ref:
         case TypeKind::RefNull:
         case TypeKind::Funcref:
+#if USE(JSVALUE32_64)
+            ASSERT(dst.asGPRlo() != src.asGPRhi());
+            m_jit.move(src.asGPRlo(), dst.asGPRlo());
+            m_jit.move(src.asGPRhi(), dst.asGPRhi());
+            break;
+#endif
         case TypeKind::Arrayref:
+        case TypeKind::I32:
+        case TypeKind::I31ref:
         case TypeKind::Structref:
         case TypeKind::Eqref:
         case TypeKind::Anyref:
@@ -8939,7 +9127,11 @@ private:
             m_jit.load32(src.asAddress(), dst.asGPR());
             break;
         case TypeKind::I64:
+#if USE(JSVALUE64)
             m_jit.load64(src.asAddress(), dst.asGPR());
+#elif USE(JSVALUE32_64)
+            m_jit.loadPair32(src.asAddress(), dst.asGPRlo(), dst.asGPRhi());
+#endif
             break;
         case TypeKind::F32:
             m_jit.loadFloat(src.asAddress(), dst.asFPR());
@@ -8951,6 +9143,10 @@ private:
         case TypeKind::RefNull:
         case TypeKind::Externref:
         case TypeKind::Funcref:
+#if USE(JSVALUE32_64)
+            m_jit.loadPair32(src.asAddress(), dst.asGPRlo(), dst.asGPRhi());
+            break;
+#endif
         case TypeKind::Arrayref:
         case TypeKind::Structref:
         case TypeKind::Eqref:
@@ -9114,6 +9310,10 @@ private:
         if (reg.kind() == Location::None
             || value.isFloat() != reg.isFPR()
             || (reg.isGPR() && !m_gprSet.contains(reg.asGPR(), IgnoreVectors))
+#if USE(JSVALUE32_64)
+            || (reg.isGPR2() && !typeNeedsGPR2(value.type()))
+            || (reg.isGPR() && typeNeedsGPR2(value.type()))
+#endif
             || (reg.isFPR() && !m_fprSet.contains(reg.asFPR(), Width::Width128)))
             reg = allocateRegister(value);
         increaseKey(reg);
@@ -9186,6 +9386,14 @@ private:
     {
         if (isFloatingPointType(type))
             return Location::fromFPR(m_fprSet.isEmpty() ? evictFPR() : nextFPR());
+#if USE(JSVALUE32_64)
+        if (typeNeedsGPR2(type)) {
+            auto next = m_gprSet.begin();
+            auto lo = next == m_gprSet.end() ? evictGPR() : (*next).gpr();
+            auto hi = ++next == m_gprSet.end() ? evictGPR() : (*next).gpr();
+            return Location::fromGPR2(hi, lo);
+        }
+#endif
         return Location::fromGPR(m_gprSet.isEmpty() ? evictGPR() : nextGPR());
     }
 
@@ -9215,6 +9423,16 @@ private:
                 ASSERT(m_fprSet.contains(loc.asFPR(), Width::Width128));
                 m_fprSet.remove(loc.asFPR());
                 m_fprBindings[loc.asFPR()] = RegisterBinding::fromValue(value);
+#if USE(JSVALUE32_64)
+            } else if (loc.isGPR2()) {
+                ASSERT(m_gprSet.contains(loc.asGPRlo(), IgnoreVectors));
+                ASSERT(m_gprSet.contains(loc.asGPRhi(), IgnoreVectors));
+                m_gprSet.remove(loc.asGPRlo());
+                m_gprSet.remove(loc.asGPRhi());
+                auto binding = RegisterBinding::fromValue(value);
+                m_gprBindings[loc.asGPRlo()] = binding;
+                m_gprBindings[loc.asGPRhi()] = binding;
+#endif
             } else {
                 ASSERT(m_gprSet.contains(loc.asGPR(), IgnoreVectors));
                 m_gprSet.remove(loc.asGPR());
@@ -9247,6 +9465,13 @@ private:
             ASSERT(m_validGPRs.contains(loc.asGPR(), IgnoreVectors));
             m_gprSet.add(loc.asGPR(), IgnoreVectors);
             m_gprBindings[loc.asGPR()] = RegisterBinding::none();
+#if USE(JSVALUE32_64)
+        } else if (loc.isGPR2()) {
+            m_gprSet.add(loc.asGPRlo(), IgnoreVectors);
+            m_gprSet.add(loc.asGPRhi(), IgnoreVectors);
+            m_gprBindings[loc.asGPRlo()] = RegisterBinding::none();
+            m_gprBindings[loc.asGPRhi()] = RegisterBinding::none();
+#endif
         }
         if (value.isLocal())
             m_locals[value.asLocal()] = m_localSlots[value.asLocal()];
@@ -9417,7 +9642,11 @@ private:
                     bindFPRToScratch(reg.fpr());
             }
             for (int i = 0; i < GPRs; i ++)
+#if CPU(X86_64) || CPU(ARM64)
                 m_tempGPRs[i] = bindGPRToScratch(m_generator.allocateRegister(TypeKind::I64).asGPR());
+#else
+                m_tempGPRs[i] = bindGPRToScratch(m_generator.allocateRegister(TypeKind::I32).asGPR());
+#endif
             for (int i = 0; i < FPRs; i ++)
                 m_tempFPRs[i] = bindFPRToScratch(m_generator.allocateRegister(TypeKind::F64).asFPR());
         }
