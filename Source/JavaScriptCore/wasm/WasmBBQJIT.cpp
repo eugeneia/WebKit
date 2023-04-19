@@ -6704,6 +6704,9 @@ public:
 
     void emitLoopTierUpCheck(const ControlData& data, Stack& enclosingStack, unsigned loopIndex)
     {
+        if (!m_tierUp)
+            return;
+
         ASSERT(m_tierUp->osrEntryTriggers().size() == loopIndex);
         m_tierUp->osrEntryTriggers().append(TierUpCount::TriggerReason::DontTrigger);
 
@@ -7289,6 +7292,7 @@ public:
             entryData.convertLoopToBlock();
             entryData.flushAndSingleExit(*this, entryData, entry.enclosedExpressionStack, false, true, unreachable);
             entryData.linkJumpsTo(entryData.loopLabel(), &m_jit);
+            if (m_tierUp)
             m_outerLoops.takeLast();
             break;
         case BlockType::Try:
@@ -9902,7 +9906,11 @@ Expected<std::unique_ptr<InternalFunction>, String> parseAndCompileBBQ(Compilati
 {
     CompilerTimingScope totalTime("BBQ", "Total BBQ");
 
+#if CPU(X86_64) || CPU(ARM64)
     Thunks::singleton().stub(catchInWasmThunkGenerator);
+#else
+    // RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-catchInWasmThunkGenerator\n");
+#endif
 
     auto result = makeUnique<InternalFunction>();
 
