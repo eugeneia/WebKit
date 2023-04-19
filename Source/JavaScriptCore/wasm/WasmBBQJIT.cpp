@@ -92,6 +92,9 @@ public:
     static_assert(maxFunctionLocals < 1 << LocalIndexBits);
 
     static constexpr GPRReg wasmScratchGPR = GPRInfo::nonPreservedNonArgumentGPR0; // Scratch registers to hold temporaries in operations.
+#if USE(JSVALUE32_64)
+    static constexpr GPRReg wasmScratchGPR2 = GPRInfo::nonPreservedNonArgumentGPR1; // Scratch registers to hold temporaries in operations.
+#endif
     static constexpr FPRReg wasmScratchFPR = FPRInfo::nonPreservedNonArgumentFPR0;
 
 #if CPU(X86) || CPU(X86_64)
@@ -1298,6 +1301,9 @@ public:
         RegisterSetBuilder callerSaveFprs = fprSetBuilder;
 
         gprSetBuilder.remove(wasmScratchGPR);
+#if USE(JSVALUE32_64)
+        gprSetBuilder.remove(wasmScratchGPR2);
+#endif
         fprSetBuilder.remove(wasmScratchFPR);
 
         m_gprSet = m_validGPRs = gprSetBuilder.buildAndValidate();
