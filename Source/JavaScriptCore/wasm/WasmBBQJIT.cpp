@@ -197,15 +197,14 @@ private:
         {
             switch (argLocation.location.kind()) {
             case ValueLocation::Kind::GPRRegister:
-        #if USE(JSVALUE64)
+#if USE(JSVALUE64)
                 UNUSED_PARAM(type);
                 return Location::fromGPR(argLocation.location.jsr().gpr());
-        #elif USE(JSVALUE32_64)
+#elif USE(JSVALUE32_64)
                 if (typeNeedsGPR2(type))
                     return Location::fromGPR2(argLocation.location.jsr().tagGPR(), argLocation.location.jsr().payloadGPR());
-                else
-                    return Location::fromGPR(argLocation.location.jsr().payloadGPR());
-        #endif
+                return Location::fromGPR(argLocation.location.jsr().payloadGPR());
+#endif
             case ValueLocation::Kind::FPRRegister:
                 return Location::fromFPR(argLocation.location.fpr());
             case ValueLocation::Kind::StackArgument:
@@ -329,7 +328,7 @@ private:
             return m_fpr;
         }
 
-    #if USE(JSVALUE32_64)
+#if USE(JSVALUE32_64)
         GPRReg asGPRlo() const
         {
             ASSERT(isGPR2());
@@ -341,7 +340,7 @@ private:
             ASSERT(isGPR2());
             return m_gprhi;
         }
-    #endif
+#endif
 
         void dump(PrintStream& out) const
         {
@@ -366,7 +365,7 @@ private:
                 break;
 #if USE(JSVALUE32_64)
             case Gpr2:
-                out.print("GPR2(", m_gprhi, ",", m_gprlo,")");
+                out.print("GPR2(", m_gprhi, ",", m_gprlo, ")");
                 break;
 #endif
             }
@@ -704,7 +703,9 @@ public:
         union {
             int32_t m_i32;
 #if USE(JSVALUE32_64)
-            struct { int32_t lo, hi; } m_i32_pair;
+            struct {
+                int32_t lo, hi;
+            } m_i32_pair;
 #endif
             int64_t m_i64;
             float m_f32;
@@ -1554,12 +1555,12 @@ public:
 
         LOG_INSTRUCTION("TableGet", tableIndex, index, RESULT(result));
         
-    #if USE(JSVALUE64)
+#if USE(JSVALUE64)
         throwExceptionIf(ExceptionType::OutOfBoundsTableAccess, m_jit.branchTest64(ResultCondition::Zero, resultLocation.asGPR()));
-    #elif USE(JSVALUE32_64)
+#elif USE(JSVALUE32_64)
         m_jit.or32(resultLocation.asGPRhi(), resultLocation.asGPRlo(), wasmScratchGPR);
         throwExceptionIf(ExceptionType::OutOfBoundsTableAccess, m_jit.branchTest32(ResultCondition::Zero, wasmScratchGPR));
-    #endif
+#endif
         
         return { };
     }
@@ -3842,15 +3843,15 @@ public:
         lowerThanMin.link(&m_jit);
 
         auto zeroResult = [&]() -> void {
-            if (returnType == Types::I32) {
+            if (returnType == Types::I32)
                 m_jit.move(TrustedImm32(0), resultLocation.asGPR());
-            } else {
-    #if USE(JSVALUE64)
+            else {
+#if USE(JSVALUE64)
                 m_jit.move(TrustedImm64(0), resultLocation.asGPR());
-    #elif USE(JSVALUE32_64)
+#elif USE(JSVALUE32_64)
                 m_jit.move(TrustedImm32(0), resultLocation.asGPRlo());
                 m_jit.move(TrustedImm32(0), resultLocation.asGPRhi());
-    #endif
+#endif
             }
         };
 
@@ -4732,7 +4733,7 @@ public:
                     modOrDiv = Math::i64_div_u;
             }
         }
-                
+
         emitCCall(modOrDiv, Vector<Value> { lhs, rhs }, returnType, result);
     }
 #endif
@@ -5609,19 +5610,20 @@ public:
             opcode, TypeKind::I32,
             BLOCK(Value::fromI32(static_cast<int32_t>(comparator(lhs.asI64(), rhs.asI64())))),
             BLOCK(
-                compareI64_32_64(condition, lhsLocation, rhsLocation, res);
+                compareI64Helper32(condition, lhsLocation, rhsLocation, res);
                 m_jit.move(res.asGPR(), resultLocation.asGPR());
             ),
             BLOCK(
                 ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
                 emitMoveConst(ImmHelpers::imm(lhs, rhs), ImmHelpers::immLocation(lhsLocation, rhsLocation));
-                compareI64_32_64(condition, lhsLocation, rhsLocation, res);
+                compareI64Helper32(condition, lhsLocation, rhsLocation, res);
                 m_jit.move(res.asGPR(), resultLocation.asGPR());
             )
         )
     }
 
-    void compareI64_32_64(RelationalCondition condition, Location lhsLocation, Location rhsLocation, Location resultLocation) {
+    void compareI64Helper32(RelationalCondition condition, Location lhsLocation, Location rhsLocation, Location resultLocation)
+    {
         if (condition == MacroAssembler::Equal || condition == MacroAssembler::NotEqual) {
             m_jit.move(TrustedImm32(condition == MacroAssembler::NotEqual), resultLocation.asGPR());
             auto compareLo = m_jit.branch32(RelationalCondition::NotEqual, lhsLocation.asGPRhi(), rhsLocation.asGPRhi());
