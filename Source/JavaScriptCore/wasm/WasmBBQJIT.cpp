@@ -1553,7 +1553,7 @@ public:
         Location resultLocation = allocate(result);
 
         LOG_INSTRUCTION("TableGet", tableIndex, index, RESULT(result));
-
+        
     #if USE(JSVALUE64)
         throwExceptionIf(ExceptionType::OutOfBoundsTableAccess, m_jit.branchTest64(ResultCondition::Zero, resultLocation.asGPR()));
     #elif USE(JSVALUE32_64)
@@ -2384,7 +2384,7 @@ public:
                     return;
                 case StoreOpType::I64Store:
 #if USE(JSVALUE64)
-                    m_jit.store64(valueLocation.asGPR(), location);
+                    m_jit.store64(valueLocation.asGPR(), location);                    
 #elif USE(JSVALUE32_64)
                     m_jit.storePair32(valueLocation.asGPRlo(), valueLocation.asGPRhi(), location);
 #endif
@@ -3692,6 +3692,7 @@ public:
         case TruncationKind::I32TruncF64U:
             m_jit.truncateDoubleToUint32(operandLocation.asFPR(), resultLocation.asGPR());
             break;
+#if USE(JSVALUE64)
         case TruncationKind::I64TruncF32S:
             m_jit.truncateFloatToInt64(operandLocation.asFPR(), resultLocation.asGPR());
             break;
@@ -3710,6 +3711,15 @@ public:
             m_jit.truncateDoubleToUint64(operandLocation.asFPR(), resultLocation.asGPR(), scratch1FPR, scratch2FPR);
             break;
         }
+#elif USE(JSVALUE32_64)
+        case TruncationKind::I64TruncF32S:
+        case TruncationKind::I64TruncF64S:
+        case TruncationKind::I64TruncF32U:
+        case TruncationKind::I64TruncF64U:
+            UNUSED_PARAM(scratch1FPR);
+            UNUSED_PARAM(scratch2FPR);
+            RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-013\n");
+#endif
         }
     }
 
@@ -4125,6 +4135,7 @@ public:
         EMIT_BINARY(
             "I64Add", TypeKind::I64,
             BLOCK(Value::fromI64(lhs.asI64() + rhs.asI64())),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.add64(lhsLocation.asGPR(), rhsLocation.asGPR(), resultLocation.asGPR());
             ),
@@ -4132,6 +4143,15 @@ public:
                 m_jit.move(ImmHelpers::regLocation(lhsLocation, rhsLocation).asGPR(), resultLocation.asGPR());
                 m_jit.add64(TrustedImm64(ImmHelpers::imm(lhs, rhs).asI64()), resultLocation.asGPR());
             )
+#else
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-014\n");
+            ),
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-014b\n");
+            )
+        
+#endif
         );
     }
 
@@ -4193,6 +4213,7 @@ public:
         EMIT_BINARY(
             "I64Sub", TypeKind::I64,
             BLOCK(Value::fromI64(lhs.asI64() - rhs.asI64())),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.sub64(lhsLocation.asGPR(), rhsLocation.asGPR(), resultLocation.asGPR());
             ),
@@ -4206,6 +4227,24 @@ public:
                     m_jit.sub64(wasmScratchGPR, rhsLocation.asGPR(), resultLocation.asGPR());
                 }
             )
+#else
+            BLOCK(
+                m_jit.sub64(
+                    lhsLocation.asGPRhi(), lhsLocation.asGPRlo(),
+                    rhsLocation.asGPRhi(), rhsLocation.asGPRlo(),
+                    resultLocation.asGPRhi(), resultLocation.asGPRlo()
+                );
+            ),
+            BLOCK(
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), ImmHelpers::immLocation(lhsLocation, rhsLocation));
+                m_jit.sub64(
+                    lhsLocation.asGPRhi(), lhsLocation.asGPRlo(),
+                    rhsLocation.asGPRhi(), rhsLocation.asGPRlo(),
+                    resultLocation.asGPRhi(), resultLocation.asGPRlo()
+                );
+            )
+#endif
         );
     }
 
@@ -4271,9 +4310,16 @@ public:
 
     PartialResult WARN_UNUSED_RETURN addI64Mul(Value lhs, Value rhs, Value& result)
     {
+#if USE(JSVALUE32_64)
+        // fixme: scratches not needed when lhs and rhs are const!
+        ScratchScope<2, 0> scratches(*this);
+        Location tmpHiLo = Location::fromGPR(scratches.gpr(0));
+        Location tmpLoHi = Location::fromGPR(scratches.gpr(1));
+#endif
         EMIT_BINARY(
             "I64Mul", TypeKind::I64,
             BLOCK(Value::fromI64(lhs.asI64() * rhs.asI64())),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.mul64(lhsLocation.asGPR(), rhsLocation.asGPR(), resultLocation.asGPR());
             ),
@@ -4282,6 +4328,24 @@ public:
                 emitMoveConst(ImmHelpers::imm(lhs, rhs), Location::fromGPR(wasmScratchGPR));
                 m_jit.mul64(lhsLocation.asGPR(), rhsLocation.asGPR(), resultLocation.asGPR());
             )
+#else
+            BLOCK(
+                m_jit.mul32(lhsLocation.asGPRhi(), rhsLocation.asGPRlo(), tmpHiLo.asGPR());
+                m_jit.mul32(lhsLocation.asGPRlo(), rhsLocation.asGPRhi(), tmpLoHi.asGPR());
+                m_jit.uMull32(lhsLocation.asGPRlo(), rhsLocation.asGPRlo(), resultLocation.asGPRhi(),  resultLocation.asGPRlo());
+                m_jit.add32(tmpHiLo.asGPR(), resultLocation.asGPRhi());
+                m_jit.add32(tmpLoHi.asGPR(), resultLocation.asGPRhi());
+            ),
+            BLOCK(
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR,  wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), ImmHelpers::immLocation(lhsLocation, rhsLocation));
+                m_jit.mul32(lhsLocation.asGPRhi(), rhsLocation.asGPRlo(), tmpHiLo.asGPR());
+                m_jit.mul32(lhsLocation.asGPRlo(), rhsLocation.asGPRhi(), tmpLoHi.asGPR());
+                m_jit.uMull32(lhsLocation.asGPRlo(), rhsLocation.asGPRlo(), resultLocation.asGPRhi(),  resultLocation.asGPRlo());
+                m_jit.add32(tmpHiLo.asGPR(), resultLocation.asGPRhi());
+                m_jit.add32(tmpLoHi.asGPR(), resultLocation.asGPRhi());
+            )
+#endif
         );
     }
 
@@ -5032,6 +5096,7 @@ public:
         EMIT_BINARY(
             "I64And", TypeKind::I64,
             BLOCK(Value::fromI64(lhs.asI64() & rhs.asI64())),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.and64(lhsLocation.asGPR(), rhsLocation.asGPR(), resultLocation.asGPR());
             ),
@@ -5039,6 +5104,14 @@ public:
                 m_jit.move(ImmHelpers::regLocation(lhsLocation, rhsLocation).asGPR(), resultLocation.asGPR());
                 m_jit.and64(TrustedImm64(ImmHelpers::imm(lhs, rhs).asI64()), resultLocation.asGPR());
             )
+#else
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-018\n");
+            ),
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-018b\n");
+            )
+#endif
         );
     }
 
@@ -5062,6 +5135,7 @@ public:
         EMIT_BINARY(
             "I64Xor", TypeKind::I64,
             BLOCK(Value::fromI64(lhs.asI64() ^ rhs.asI64())),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.xor64(lhsLocation.asGPR(), rhsLocation.asGPR(), resultLocation.asGPR());
             ),
@@ -5069,6 +5143,14 @@ public:
                 m_jit.move(ImmHelpers::regLocation(lhsLocation, rhsLocation).asGPR(), resultLocation.asGPR());
                 m_jit.xor64(TrustedImm64(ImmHelpers::imm(lhs, rhs).asI64()), resultLocation.asGPR());
             )
+#else
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-019\n");
+            ),
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-019b\n");
+            )
+#endif
         );
     }
 
@@ -5092,6 +5174,7 @@ public:
         EMIT_BINARY(
             "I64Or", TypeKind::I64,
             BLOCK(Value::fromI64(lhs.asI64() | rhs.asI64())),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.or64(lhsLocation.asGPR(), rhsLocation.asGPR(), resultLocation.asGPR());
             ),
@@ -5099,6 +5182,14 @@ public:
                 m_jit.move(ImmHelpers::regLocation(lhsLocation, rhsLocation).asGPR(), resultLocation.asGPR());
                 m_jit.or64(TrustedImm64(ImmHelpers::imm(lhs, rhs).asI64()), resultLocation.asGPR());
             )
+#else
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-020\n");
+            ),
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-020b\n");
+            )
+#endif
         );
     }
 
@@ -5148,6 +5239,7 @@ public:
         EMIT_BINARY(
             "I64Shl", TypeKind::I64,
             BLOCK(Value::fromI64(lhs.asI64() << rhs.asI64())),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 moveShiftAmountIfNecessary(rhsLocation);
                 m_jit.lshift64(lhsLocation.asGPR(), rhsLocation.asGPR(), resultLocation.asGPR());
@@ -5161,6 +5253,14 @@ public:
                     m_jit.lshift64(lhsLocation.asGPR(), rhsLocation.asGPR(), resultLocation.asGPR());
                 }
             )
+#else
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-021\n");
+            ),
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-021b\n");
+            )
+#endif
         );
     }
 
@@ -5192,6 +5292,7 @@ public:
         EMIT_BINARY(
             "I64ShrS", TypeKind::I64,
             BLOCK(Value::fromI64(lhs.asI64() >> rhs.asI64())),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 moveShiftAmountIfNecessary(rhsLocation);
                 m_jit.rshift64(lhsLocation.asGPR(), rhsLocation.asGPR(), resultLocation.asGPR());
@@ -5205,6 +5306,14 @@ public:
                     m_jit.rshift64(lhsLocation.asGPR(), rhsLocation.asGPR(), resultLocation.asGPR());
                 }
             )
+#else
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-022\n");
+            ),
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-022b\n");
+            )
+#endif
         );
     }
 
@@ -5236,6 +5345,7 @@ public:
         EMIT_BINARY(
             "I64ShrU", TypeKind::I64,
             BLOCK(Value::fromI64(static_cast<uint64_t>(lhs.asI64()) >> static_cast<uint64_t>(rhs.asI64()))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 moveShiftAmountIfNecessary(rhsLocation);
                 m_jit.urshift64(lhsLocation.asGPR(), rhsLocation.asGPR(), resultLocation.asGPR());
@@ -5249,6 +5359,14 @@ public:
                     m_jit.urshift64(lhsLocation.asGPR(), rhsLocation.asGPR(), resultLocation.asGPR());
                 }
             )
+#else
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-023\n");
+            ),
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-023b\n");
+            )
+#endif
         );
     }
 
@@ -5312,7 +5430,7 @@ public:
                     m_jit.rotateLeft64(resultLocation.asGPR(), rhsLocation.asGPR(), resultLocation.asGPR());
                 }
             )
-#else
+#elif CPU(ARM64)
             BLOCK(
                 moveShiftAmountIfNecessary(rhsLocation);
                 m_jit.neg64(rhsLocation.asGPR(), wasmScratchGPR);
@@ -5327,6 +5445,13 @@ public:
                     emitMoveConst(lhs, resultLocation);
                     m_jit.rotateRight64(resultLocation.asGPR(), wasmScratchGPR, resultLocation.asGPR());
                 }
+            )
+#else
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-024\n");
+            ),
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-024b\n");
             )
 #endif
         );
@@ -5360,6 +5485,7 @@ public:
         EMIT_BINARY(
             "I64Rotr", TypeKind::I64,
             BLOCK(Value::fromI64(B3::rotateRight(lhs.asI64(), rhs.asI64()))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 moveShiftAmountIfNecessary(rhsLocation);
                 m_jit.rotateRight64(lhsLocation.asGPR(), rhsLocation.asGPR(), resultLocation.asGPR());
@@ -5373,6 +5499,14 @@ public:
                     m_jit.rotateRight64(wasmScratchGPR, rhsLocation.asGPR(), resultLocation.asGPR());
                 }
             )
+#else
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-025\n");
+            ),
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-025b\n");
+            )
+#endif
         );
     }
 
@@ -5392,9 +5526,15 @@ public:
         EMIT_UNARY(
             "I64Clz", TypeKind::I64,
             BLOCK(Value::fromI64(WTF::clz(operand.asI64()))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.countLeadingZeros64(operandLocation.asGPR(), resultLocation.asGPR());
             )
+#else
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-026\n");
+            )
+#endif
         );
     }
 
@@ -5414,9 +5554,15 @@ public:
         EMIT_UNARY(
             "I64Ctz", TypeKind::I64,
             BLOCK(Value::fromI64(WTF::ctz(operand.asI64()))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.countTrailingZeros64(operandLocation.asGPR(), resultLocation.asGPR());
             )
+#else
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-027\n");
+            )
+#endif
         );
     }
 
@@ -5437,6 +5583,7 @@ public:
         )
     }
 
+#if CPU(X86_64) || CPU(ARM64)
     PartialResult emitCompareI64(const char* opcode, Value& lhs, Value& rhs, Value& result, RelationalCondition condition, bool (*comparator)(int64_t lhs, int64_t rhs))
     {
         EMIT_BINARY(
@@ -5452,6 +5599,60 @@ public:
             )
         )
     }
+#else
+    PartialResult emitCompareI64(const char* opcode, Value& lhs, Value& rhs, Value& result, RelationalCondition condition, bool (*comparator)(int64_t lhs, int64_t rhs))
+    {
+        // fixme: scratches not needed when lhs and rhs are constant!
+        ScratchScope<1, 0> scratches(*this);
+        auto res = Location::fromGPR(scratches.gpr(0));
+        EMIT_BINARY(
+            opcode, TypeKind::I32,
+            BLOCK(Value::fromI32(static_cast<int32_t>(comparator(lhs.asI64(), rhs.asI64())))),
+            BLOCK(
+                compareI64_32_64(condition, lhsLocation, rhsLocation, res);
+                m_jit.move(res.asGPR(), resultLocation.asGPR());
+            ),
+            BLOCK(
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), ImmHelpers::immLocation(lhsLocation, rhsLocation));
+                compareI64_32_64(condition, lhsLocation, rhsLocation, res);
+                m_jit.move(res.asGPR(), resultLocation.asGPR());
+            )
+        )
+    }
+
+    void compareI64_32_64(RelationalCondition condition, Location lhsLocation, Location rhsLocation, Location resultLocation) {
+        if (condition == MacroAssembler::Equal || condition == MacroAssembler::NotEqual) {
+            m_jit.move(TrustedImm32(condition == MacroAssembler::NotEqual), resultLocation.asGPR());
+            auto compareLo = m_jit.branch32(RelationalCondition::NotEqual, lhsLocation.asGPRhi(), rhsLocation.asGPRhi());
+            m_jit.compare32(condition, lhsLocation.asGPRlo(), rhsLocation.asGPRlo(), resultLocation.asGPR());
+            compareLo.link(&m_jit);
+        } else {
+            auto compareLo = m_jit.branch32(RelationalCondition::Equal, lhsLocation.asGPRhi(), rhsLocation.asGPRhi());
+            // Signed to unsigned, leave the rest alone
+            RelationalCondition loCond;
+            switch (condition) {
+            case MacroAssembler::GreaterThan:
+                loCond = MacroAssembler::Above;
+                break;
+            case MacroAssembler::LessThan:
+                loCond = MacroAssembler::Below;
+                break;
+            case MacroAssembler::GreaterThanOrEqual:
+                loCond = MacroAssembler::AboveOrEqual;
+                break;
+            case MacroAssembler::LessThanOrEqual:
+                loCond = MacroAssembler::BelowOrEqual;
+                break;
+            default:
+                break;
+            }
+            m_jit.compare32(loCond, lhsLocation.asGPRlo(), rhsLocation.asGPRlo(), resultLocation.asGPR());
+            compareLo.link(&m_jit);
+            m_jit.compare32(condition, lhsLocation.asGPRhi(), rhsLocation.asGPRhi(), resultLocation.asGPR());
+        }
+    }
+#endif
 
 #define RELOP_AS_LAMBDA(op) [](auto lhs, auto rhs) -> auto { return lhs op rhs; }
 #define TYPED_RELOP_AS_LAMBDA(type, op) [](auto lhs, auto rhs) -> auto { return static_cast<type>(lhs) op static_cast<type>(rhs); }
@@ -5656,9 +5857,15 @@ public:
         EMIT_UNARY(
             "I32WrapI64", TypeKind::I32,
             BLOCK(Value::fromI32(static_cast<int32_t>(operand.asI64()))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.move(operandLocation.asGPR(), resultLocation.asGPR());
             )
+#else
+            BLOCK(
+                m_jit.move(operandLocation.asGPRlo(), resultLocation.asGPR());
+            )
+#endif
         )
     }
 
@@ -5689,9 +5896,15 @@ public:
         EMIT_UNARY(
             "I64Extend8S", TypeKind::I64,
             BLOCK(Value::fromI64(static_cast<int64_t>(static_cast<int8_t>(operand.asI64())))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.signExtend8To64(operandLocation.asGPR(), resultLocation.asGPR());
             )
+#else
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-204\n");
+            )
+#endif
         )
     }
 
@@ -5700,9 +5913,15 @@ public:
         EMIT_UNARY(
             "I64Extend16S", TypeKind::I64,
             BLOCK(Value::fromI64(static_cast<int64_t>(static_cast<int16_t>(operand.asI64())))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.signExtend16To64(operandLocation.asGPR(), resultLocation.asGPR());
             )
+#else
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-205\n");
+            )
+#endif
         )
     }
 
@@ -5711,9 +5930,15 @@ public:
         EMIT_UNARY(
             "I64Extend32S", TypeKind::I64,
             BLOCK(Value::fromI64(static_cast<int64_t>(static_cast<int32_t>(operand.asI64())))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.signExtend32To64(operandLocation.asGPR(), resultLocation.asGPR());
             )
+#else
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-208\n");
+            )
+#endif
         )
     }
 
@@ -5722,9 +5947,16 @@ public:
         EMIT_UNARY(
             "I64ExtendSI32", TypeKind::I64,
             BLOCK(Value::fromI64(static_cast<int64_t>(operand.asI32()))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.signExtend32To64(operandLocation.asGPR(), resultLocation.asGPR());
             )
+#else
+            BLOCK(
+                m_jit.move(operandLocation.asGPR(), resultLocation.asGPRlo());
+                m_jit.rshift32(operandLocation.asGPR(), TrustedImm32(31), resultLocation.asGPRhi());
+            )
+#endif
         )
     }
 
@@ -5733,9 +5965,16 @@ public:
         EMIT_UNARY(
             "I64ExtendUI32", TypeKind::I64,
             BLOCK(Value::fromI64(static_cast<uint64_t>(static_cast<uint32_t>(operand.asI32())))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.zeroExtend32ToWord(operandLocation.asGPR(), resultLocation.asGPR());
             )
+#else
+            BLOCK(
+                m_jit.move(operandLocation.asGPR(), resultLocation.asGPRlo());
+                m_jit.xor32(resultLocation.asGPRhi(), resultLocation.asGPRhi());
+            )
+#endif
         )
     }
 
@@ -5755,9 +5994,16 @@ public:
         EMIT_UNARY(
             "I64Eqz", TypeKind::I32,
             BLOCK(Value::fromI32(!operand.asI64())),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.test64(ResultCondition::Zero, operandLocation.asGPR(), operandLocation.asGPR(), resultLocation.asGPR());
             )
+#else
+            BLOCK(
+                m_jit.or32(operandLocation.asGPRhi(), operandLocation.asGPRlo(), resultLocation.asGPR());
+                m_jit.test32(ResultCondition::Zero, resultLocation.asGPR(), resultLocation.asGPR(), resultLocation.asGPR());
+            )
+#endif
         )
     }
 
@@ -5809,9 +6055,15 @@ public:
         EMIT_UNARY(
             "I64ReinterpretF64", TypeKind::I64,
             BLOCK(Value::fromI64(bitwise_cast<int64_t>(operand.asF64()))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.moveDoubleTo64(operandLocation.asFPR(), resultLocation.asGPR());
             )
+#else
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-030\n");
+            )
+#endif
         )
     }
 
@@ -5831,9 +6083,15 @@ public:
         EMIT_UNARY(
             "F64ReinterpretI64", TypeKind::F64,
             BLOCK(Value::fromF64(bitwise_cast<double>(operand.asI64()))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.move64ToDouble(operandLocation.asGPR(), resultLocation.asFPR());
             )
+#else
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-031\n");
+            )
+#endif
         )
     }
 
@@ -5880,9 +6138,11 @@ public:
                 ScratchScope<1, 0> scratches(*this);
                 m_jit.zeroExtend32ToWord(operandLocation.asGPR(), wasmScratchGPR);
                 m_jit.convertUInt64ToFloat(wasmScratchGPR, resultLocation.asFPR(), scratches.gpr(0));
-#else
+#elif CPU(ARM64)
                 m_jit.zeroExtend32ToWord(operandLocation.asGPR(), wasmScratchGPR);
                 m_jit.convertUInt64ToFloat(wasmScratchGPR, resultLocation.asFPR());
+#else
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-032\n");
 #endif
             )
         )
@@ -5893,9 +6153,15 @@ public:
         EMIT_UNARY(
             "F32ConvertSI64", TypeKind::F32,
             BLOCK(Value::fromF32(operand.asI64())),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.convertInt64ToFloat(operandLocation.asGPR(), resultLocation.asFPR());
             )
+#else
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-033\n");
+            )
+#endif
         )
     }
 
@@ -5907,8 +6173,10 @@ public:
             BLOCK(
 #if CPU(X86_64)
                 m_jit.convertUInt64ToFloat(operandLocation.asGPR(), resultLocation.asFPR(), wasmScratchGPR);
-#else
+#elif CPU(ARM64)
                 m_jit.convertUInt64ToFloat(operandLocation.asGPR(), resultLocation.asFPR());
+#else
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-034\n");
 #endif
             )
         )
@@ -5935,9 +6203,11 @@ public:
                 ScratchScope<1, 0> scratches(*this);
                 m_jit.zeroExtend32ToWord(operandLocation.asGPR(), wasmScratchGPR);
                 m_jit.convertUInt64ToDouble(wasmScratchGPR, resultLocation.asFPR(), scratches.gpr(0));
-#else
+#elif CPU(ARM64)
                 m_jit.zeroExtend32ToWord(operandLocation.asGPR(), wasmScratchGPR);
                 m_jit.convertUInt64ToDouble(wasmScratchGPR, resultLocation.asFPR());
+#else
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-035\n");
 #endif
             )
         )
@@ -5949,7 +6219,11 @@ public:
             "F64ConvertSI64", TypeKind::F64,
             BLOCK(Value::fromF64(operand.asI64())),
             BLOCK(
+#if CPU(X86_64) || CPU(ARM64)
                 m_jit.convertInt64ToDouble(operandLocation.asGPR(), resultLocation.asFPR());
+#else
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-036\n");
+#endif
             )
         )
     }
@@ -5962,8 +6236,10 @@ public:
             BLOCK(
 #if CPU(X86_64)
                 m_jit.convertUInt64ToDouble(operandLocation.asGPR(), resultLocation.asFPR(), wasmScratchGPR);
-#else
+#elif CPU(ARM64)
                 m_jit.convertUInt64ToDouble(operandLocation.asGPR(), resultLocation.asFPR());
+#else
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-037\n");
 #endif
             )
         )
@@ -6030,6 +6306,7 @@ public:
         EMIT_BINARY(
             "F64Copysign", TypeKind::F64,
             BLOCK(Value::fromF64(doubleCopySign(lhs.asF64(), rhs.asF64()))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 // FIXME: Better than what we have in the Air backend, but still not great. I think
                 // there's some vector instruction we can use to do this much quicker.
@@ -6083,6 +6360,14 @@ public:
 #endif
                 }
             )
+#else
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-210\n");
+            ),
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-210b\n");
+            )
+#endif
         )
     }
 
@@ -6309,10 +6594,16 @@ public:
         EMIT_UNARY(
             "RefIsNull", TypeKind::I32,
             BLOCK(Value::fromI32(operand.asRef() == JSValue::encode(jsNull()))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 ASSERT(JSValue::encode(jsNull()) >= 0 && JSValue::encode(jsNull()) <= INT32_MAX);
                 m_jit.compare64(RelationalCondition::Equal, operandLocation.asGPR(), TrustedImm32(static_cast<int32_t>(JSValue::encode(jsNull()))), resultLocation.asGPR());
             )
+#else
+            BLOCK(
+                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-040\n");
+            )
+#endif
         );
         return { };
     }
@@ -6331,7 +6622,11 @@ public:
         result = topValue(TypeKind::Ref);
         Location resultLocation = allocate(result);
         ASSERT(JSValue::encode(jsNull()) >= 0 && JSValue::encode(jsNull()) <= INT32_MAX);
+#if USE(JSVALUE64)
         throwExceptionIf(ExceptionType::NullRefAsNonNull, m_jit.branch64(RelationalCondition::Equal, valueLocation.asGPR(), TrustedImm32(static_cast<int32_t>(JSValue::encode(jsNull())))));
+#elif USE(JSVALUE32_64)
+        throwExceptionIf(ExceptionType::NullRefAsNonNull, m_jit.branch32(RelationalCondition::Equal, valueLocation.asGPR(), TrustedImm32(static_cast<int32_t>(JSValue::encode(jsNull())))));
+#endif
         m_jit.move(valueLocation.asGPR(), resultLocation.asGPR());
 
         return { };
@@ -7191,7 +7486,7 @@ public:
             auto fallThrough = m_jit.branch32(RelationalCondition::AboveOrEqual, wasmScratchGPR, TrustedImm32(targets.size()));
             m_jit.zeroExtend32ToWord(wasmScratchGPR, wasmScratchGPR);
             if constexpr (is64Bit())
-            m_jit.lshiftPtr(TrustedImm32(3), wasmScratchGPR);
+                m_jit.lshiftPtr(TrustedImm32(3), wasmScratchGPR);
             else
                 m_jit.lshiftPtr(TrustedImm32(2), wasmScratchGPR);
             m_jit.addPtr(TrustedImmPtr(jumpTable->data()), wasmScratchGPR);
@@ -7293,7 +7588,7 @@ public:
             entryData.flushAndSingleExit(*this, entryData, entry.enclosedExpressionStack, false, true, unreachable);
             entryData.linkJumpsTo(entryData.loopLabel(), &m_jit);
             if (m_tierUp)
-            m_outerLoops.takeLast();
+                m_outerLoops.takeLast();
             break;
         case BlockType::Try:
         case BlockType::Catch:
@@ -7378,7 +7673,7 @@ public:
         if (!!m_info.memory)
             loadWebAssemblyGlobalState(GPRInfo::wasmBaseMemoryPointer, GPRInfo::wasmBoundsCheckingSizeRegister);
 #endif
-        }
+    }
 
     void loadWebAssemblyGlobalState(GPRReg wasmBaseMemoryPointer, GPRReg wasmBoundsCheckingSizeRegister)
     {
@@ -7815,6 +8110,9 @@ public:
     {
         m_usesSIMD = true;
     }
+
+
+#if CPU(X86_64) || CPU(ARM64)
 
     PartialResult WARN_UNUSED_RETURN addSIMDLoad(ExpressionType pointer, uint32_t uoffset, ExpressionType& result)
     {
@@ -8850,6 +9148,110 @@ public:
             return { };
         }
     }
+
+#else
+
+    PartialResult addSIMDLoad(ExpressionType, uint32_t, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDStore(ExpressionType, ExpressionType, uint32_t)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDSplat(SIMDLane, ExpressionType, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDShuffle(v128_t, ExpressionType, ExpressionType, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDShift(SIMDLaneOperation, SIMDInfo, ExpressionType, ExpressionType, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDExtmul(SIMDLaneOperation, SIMDInfo, ExpressionType, ExpressionType, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDLoadSplat(SIMDLaneOperation, ExpressionType, uint32_t, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDLoadLane(SIMDLaneOperation, ExpressionType, ExpressionType, uint32_t, uint8_t, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDStoreLane(SIMDLaneOperation, ExpressionType, ExpressionType, uint32_t, uint8_t)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDLoadExtend(SIMDLaneOperation, ExpressionType, uint32_t, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDLoadPad(SIMDLaneOperation, ExpressionType, uint32_t, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void materializeVectorConstant(v128_t, Location)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    ExpressionType addConstant(v128_t)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addExtractLane(SIMDInfo, uint8_t, Value, Value&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addReplaceLane(SIMDInfo, uint8_t, ExpressionType, ExpressionType, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDI_V(SIMDLaneOperation, SIMDInfo, ExpressionType, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDV_V(SIMDLaneOperation, SIMDInfo, ExpressionType, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDBitwiseSelect(ExpressionType, ExpressionType, ExpressionType, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDRelOp(SIMDLaneOperation, SIMDInfo, ExpressionType, ExpressionType, B3::Air::Arg, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDV_VV(SIMDLaneOperation, SIMDInfo, ExpressionType, ExpressionType, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+#endif // CPU(X86_64) || CPU(ARM64)
 
     void dump(const ControlStack&, const Stack*) { }
     void didFinishParsingLocals() { }
