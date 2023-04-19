@@ -3717,24 +3717,31 @@ public:
         // Below-minimum case.
         lowerThanMin.link(&m_jit);
 
+        auto zeroResult = [&]() -> void {
+            if (returnType == Types::I32) {
+                m_jit.move(TrustedImm32(0), resultLocation.asGPR());
+            } else {
+    #if USE(JSVALUE64)
+                m_jit.move(TrustedImm64(0), resultLocation.asGPR());
+    #elif USE(JSVALUE32_64)
+                m_jit.move(TrustedImm32(0), resultLocation.asGPRlo());
+                m_jit.move(TrustedImm32(0), resultLocation.asGPRhi());
+    #endif
+            }
+        };
+
         // As an optimization, if the min result is 0; we can unconditionally return
         // that if the above-minimum-range check fails; otherwise, we need to check
         // for NaN since it also will fail the above-minimum-range-check
         if (!minResult) {
-            if (returnType == Types::I32)
-                m_jit.move(TrustedImm32(0), resultLocation.asGPR());
-            else
-                m_jit.move(TrustedImm64(0), resultLocation.asGPR());
+            zeroResult();
         } else {
             Jump isNotNaN = operandType == Types::F32
                 ? m_jit.branchFloat(DoubleCondition::DoubleEqualAndOrdered, operandLocation.asFPR(), operandLocation.asFPR())
                 : m_jit.branchDouble(DoubleCondition::DoubleEqualAndOrdered, operandLocation.asFPR(), operandLocation.asFPR());
 
             // NaN case. Set result to zero.
-            if (returnType == Types::I32)
-                m_jit.move(TrustedImm32(0), resultLocation.asGPR());
-            else
-                m_jit.move(TrustedImm64(0), resultLocation.asGPR());
+            zeroResult();
             Jump afterNaN = m_jit.jump();
 
             // Non-NaN case. Set result to the minimum value.
