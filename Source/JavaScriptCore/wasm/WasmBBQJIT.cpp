@@ -6475,10 +6475,18 @@ public:
                 pointer += 8;
                 size -= 8;
             }
-#else
+#elif CPU(X86_64)
             unsigned count = size / 8;
             for (unsigned i = 0; i < count; ++i) {
                 m_jit.store64(TrustedImm64(0), Address(GPRInfo::callFrameRegister, pointer));
+                pointer += 8;
+                size -= 8;
+            }
+#else
+            unsigned count = size / 8;
+            for (unsigned i = 0; i < count; ++i) {
+                m_jit.store32(TrustedImm32(0), Address(GPRInfo::callFrameRegister, pointer));
+                m_jit.store32(TrustedImm32(0), Address(GPRInfo::callFrameRegister, pointer+4));
                 pointer += 8;
                 size -= 8;
             }
@@ -6577,7 +6585,12 @@ public:
 
         int frameSize = m_frameSize + m_maxCalleeStackSize;
         int roundedFrameSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), frameSize);
+#if CPU(X86_64) || CPU(ARM64)
         m_jit.subPtr(GPRInfo::callFrameRegister, TrustedImm32(roundedFrameSize), MacroAssembler::stackPointerRegister);
+#else
+        m_jit.subPtr(GPRInfo::callFrameRegister, TrustedImm32(roundedFrameSize), wasmScratchGPR);
+        m_jit.move(wasmScratchGPR, MacroAssembler::stackPointerRegister);
+#endif
 
         MacroAssembler::JumpList underflow;
         underflow.append(m_jit.branchPtr(CCallHelpers::Above, MacroAssembler::stackPointerRegister, GPRInfo::callFrameRegister));
@@ -7174,7 +7187,10 @@ public:
             auto* jumpTable = m_callee.addJumpTable(targets.size());
             auto fallThrough = m_jit.branch32(RelationalCondition::AboveOrEqual, wasmScratchGPR, TrustedImm32(targets.size()));
             m_jit.zeroExtend32ToWord(wasmScratchGPR, wasmScratchGPR);
+            if constexpr (is64Bit())
             m_jit.lshiftPtr(TrustedImm32(3), wasmScratchGPR);
+            else
+                m_jit.lshiftPtr(TrustedImm32(2), wasmScratchGPR);
             m_jit.addPtr(TrustedImmPtr(jumpTable->data()), wasmScratchGPR);
             m_jit.farJump(Address(wasmScratchGPR), JSSwitchPtrTag);
 
@@ -7300,7 +7316,13 @@ public:
         int frameSize = m_frameSize + m_maxCalleeStackSize;
         CCallHelpers& jit = m_jit;
         m_jit.addLinkTask([frameSize, labels = WTFMove(m_frameSizeLabels), &jit](LinkBuffer& linkBuffer) {
+#if CPU(X86_64) || CPU(ARM64)
             int roundedFrameSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), frameSize);
+#elif CPU(ARM_THUMB2)
+            // On armv7 account for misalignment due to of saved {FP, PC}
+            constexpr int misalignment = 4 + 4;
+            int roundedFrameSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), frameSize + misalignment) - misalignment;
+#endif
             for (auto label : labels)
                 jit.repatchPointer(linkBuffer.locationOf<NoPtrTag>(label), bitwise_cast<void*>(static_cast<uintptr_t>(roundedFrameSize)));
         });
@@ -7729,7 +7751,11 @@ public:
 
             // Compute the offset in the table index space we are looking for.
             m_jit.move(TrustedImmPtr(sizeof(FuncRefTable::Function)), calleeSignatureIndex);
+#if CPU(ARM_THUMB2)
+            m_jit.mul32(calleeIndexLocation.asGPR(), calleeSignatureIndex);
+#else
             m_jit.mul64(calleeIndexLocation.asGPR(), calleeSignatureIndex);
+#endif
             m_jit.addPtr(callableFunctionBuffer, calleeSignatureIndex);
 
             // FIXME: This seems wasteful to do two checks just for a nicer error message.
