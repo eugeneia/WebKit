@@ -4248,7 +4248,7 @@ public:
     ScratchScope<0, 0> scratches(*this, clobbersForDivX86())
 
     template<typename IntType, bool IsMod>
-    void emitModOrDiv(const Value& lhs, Location lhsLocation, const Value& rhs, Location rhsLocation, Location resultLocation)
+    void emitModOrDiv(const Value& lhs, Location lhsLocation, const Value& rhs, Location rhsLocation, const Value&, Location resultLocation)
     {
         // FIXME: We currently don't do nearly as sophisticated instruction selection on Intel as we do on other platforms,
         // but there's no good reason we can't. We should probably port over the isel in the future if it seems to yield
@@ -4329,11 +4329,11 @@ public:
         if (toEnd.isSet())
             toEnd.link(&m_jit);
     }
-#else
+#elif CPU(ARM64)
 #define PREPARE_FOR_MOD_OR_DIV
 
     template<typename IntType, bool IsMod>
-    void emitModOrDiv(const Value& lhs, Location lhsLocation, const Value& rhs, Location rhsLocation, Location resultLocation)
+    void emitModOrDiv(const Value& lhs, Location lhsLocation, const Value& rhs, Location rhsLocation, const Value&, Location resultLocation)
     {
         constexpr bool isSigned = std::is_signed<IntType>();
         constexpr bool is32 = sizeof(IntType) == 4;
@@ -4510,6 +4510,53 @@ public:
                 m_jit.multiplySub64(divResult, rhsLocation.asGPR(), lhsLocation.asGPR(), resultLocation.asGPR());
         }
     }
+#else
+#define PREPARE_FOR_MOD_OR_DIV
+
+    template<typename IntType, bool IsMod>
+    void emitModOrDiv(Value lhs, Location, Value rhs, Location, Value result, Location)
+    {
+
+        static_assert(sizeof(IntType) == 4 || sizeof(IntType) == 8);
+
+        constexpr bool isSigned = std::is_signed<IntType>();
+        constexpr bool is32 = sizeof(IntType) == 4;
+
+        TypeKind returnType;
+        if constexpr (is32)
+            returnType = TypeKind::I32;
+        else
+            returnType = TypeKind::I64;
+
+        IntType (*modOrDiv)(IntType, IntType);
+        if constexpr (IsMod) {
+            if constexpr (is32) {
+                if constexpr (isSigned)
+                    modOrDiv = Math::i32_rem_s;
+                else
+                    modOrDiv = Math::i32_rem_u;
+            } else {
+                if constexpr (isSigned)
+                    modOrDiv = Math::i64_rem_s;
+                else
+                    modOrDiv = Math::i64_rem_u;
+            }
+        } else {
+            if constexpr (is32) {
+                if constexpr (isSigned)
+                    modOrDiv = Math::i32_div_s;
+                else
+                    modOrDiv = Math::i32_div_u;
+            } else {
+                if constexpr (isSigned)
+                    modOrDiv = Math::i64_div_s;
+                else
+                    modOrDiv = Math::i64_div_u;
+            }
+        }
+                
+        emitCCall(modOrDiv, Vector<Value> { lhs, rhs }, returnType, result);
+    }
 #endif
 
     template<typename IntType>
@@ -4538,10 +4585,10 @@ public:
                 Value::fromI32(lhs.asI32() / checkConstantDivision<int32_t>(lhs, rhs).asI32())
             ),
             BLOCK(
-                emitModOrDiv<int32_t, false>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<int32_t, false>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             ),
             BLOCK(
-                emitModOrDiv<int32_t, false>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<int32_t, false>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             )
         );
     }
@@ -4555,10 +4602,10 @@ public:
                 Value::fromI64(lhs.asI64() / checkConstantDivision<int64_t>(lhs, rhs).asI64())
             ),
             BLOCK(
-                emitModOrDiv<int64_t, false>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<int64_t, false>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             ),
             BLOCK(
-                emitModOrDiv<int64_t, false>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<int64_t, false>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             )
         );
     }
@@ -4572,10 +4619,10 @@ public:
                 Value::fromI32(static_cast<uint32_t>(lhs.asI32()) / static_cast<uint32_t>(checkConstantDivision<int32_t>(lhs, rhs).asI32()))
             ),
             BLOCK(
-                emitModOrDiv<uint32_t, false>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<uint32_t, false>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             ),
             BLOCK(
-                emitModOrDiv<uint32_t, false>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<uint32_t, false>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             )
         );
     }
@@ -4589,10 +4636,10 @@ public:
                 Value::fromI64(static_cast<uint64_t>(lhs.asI64()) / static_cast<uint64_t>(checkConstantDivision<int64_t>(lhs, rhs).asI64()))
             ),
             BLOCK(
-                emitModOrDiv<uint64_t, false>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<uint64_t, false>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             ),
             BLOCK(
-                emitModOrDiv<uint64_t, false>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<uint64_t, false>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             )
         );
     }
@@ -4606,10 +4653,10 @@ public:
                 Value::fromI32(lhs.asI32() % checkConstantDivision<int32_t>(lhs, rhs).asI32())
             ),
             BLOCK(
-                emitModOrDiv<int32_t, true>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<int32_t, true>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             ),
             BLOCK(
-                emitModOrDiv<int32_t, true>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<int32_t, true>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             )
         );
     }
@@ -4623,10 +4670,10 @@ public:
                 Value::fromI64(lhs.asI64() % checkConstantDivision<int64_t>(lhs, rhs).asI64())
             ),
             BLOCK(
-                emitModOrDiv<int64_t, true>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<int64_t, true>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             ),
             BLOCK(
-                emitModOrDiv<int64_t, true>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<int64_t, true>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             )
         );
     }
@@ -4640,10 +4687,10 @@ public:
                 Value::fromI32(static_cast<uint32_t>(lhs.asI32()) % static_cast<uint32_t>(checkConstantDivision<int32_t>(lhs, rhs).asI32()))
             ),
             BLOCK(
-                emitModOrDiv<uint32_t, true>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<uint32_t, true>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             ),
             BLOCK(
-                emitModOrDiv<uint32_t, true>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<uint32_t, true>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             )
         );
     }
@@ -4657,10 +4704,10 @@ public:
                 Value::fromI64(static_cast<uint64_t>(lhs.asI64()) % static_cast<uint64_t>(checkConstantDivision<int64_t>(lhs, rhs).asI64()))
             ),
             BLOCK(
-                emitModOrDiv<uint64_t, true>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<uint64_t, true>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             ),
             BLOCK(
-                emitModOrDiv<uint64_t, true>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<uint64_t, true>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             )
         );
     }
