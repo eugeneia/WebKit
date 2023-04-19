@@ -104,6 +104,22 @@ public:
 #endif
 
 private:
+#if USE(JSVALUE32_64)
+    static bool typeNeedsGPR2(TypeKind type)
+    {
+        switch (type) {
+        case TypeKind::I64:
+        case TypeKind::Funcref:
+        case TypeKind::Externref:
+        case TypeKind::RefNull:
+        case TypeKind::Ref:
+            return true;
+        default:
+            return false;
+        }
+    }
+#endif
+
     struct Location {
         enum Kind : uint8_t {
             None = 0,
@@ -111,7 +127,10 @@ private:
             Gpr = 2,
             Fpr = 3,
             Global = 4,
-            StackArgument = 5
+            StackArgument = 5,
+#if USE(JSVALUE32_64)
+            Gpr2 = 6 
+#endif
         };
 
         Location()
@@ -147,6 +166,17 @@ private:
             return loc;
         }
 
+#if USE(JSVALUE32_64)
+        static Location fromGPR2(GPRReg hi, GPRReg lo)
+        {
+            Location loc;
+            loc.m_kind = Gpr2;
+            loc.m_gprhi = hi;
+            loc.m_gprlo = lo;
+            return loc;
+        }
+#endif
+
         static Location fromFPR(FPRReg fpr)
         {
             Location loc;
@@ -163,11 +193,19 @@ private:
             return loc;
         }
 
-        static Location fromArgumentLocation(ArgumentLocation argLocation)
+        static Location fromArgumentLocation(ArgumentLocation argLocation, TypeKind type)
         {
             switch (argLocation.location.kind()) {
             case ValueLocation::Kind::GPRRegister:
+        #if USE(JSVALUE64)
+                UNUSED_PARAM(type);
                 return Location::fromGPR(argLocation.location.jsr().gpr());
+        #elif USE(JSVALUE32_64)
+                if (typeNeedsGPR2(type))
+                    return Location::fromGPR2(argLocation.location.jsr().tagGPR(), argLocation.location.jsr().payloadGPR());
+                else
+                    return Location::fromGPR(argLocation.location.jsr().payloadGPR());
+        #endif
             case ValueLocation::Kind::FPRRegister:
                 return Location::fromFPR(argLocation.location.fpr());
             case ValueLocation::Kind::StackArgument:
@@ -188,6 +226,13 @@ private:
             return m_kind == Gpr;
         }
 
+#if USE(JSVALUE32_64)
+        bool isGPR2() const
+        {
+            return m_kind == Gpr2;
+        }
+#endif
+
         bool isFPR() const
         {
             return m_kind == Fpr;
@@ -195,7 +240,11 @@ private:
 
         bool isRegister() const
         {
+#if USE(JSVALUE64)
             return isGPR() || isFPR();
+#elif USE(JSVALUE32_64)
+            return isGPR() || isGPR2() || isFPR();
+#endif
         }
 
         bool isStack() const
@@ -280,6 +329,20 @@ private:
             return m_fpr;
         }
 
+    #if USE(JSVALUE32_64)
+        GPRReg asGPRlo() const
+        {
+            ASSERT(isGPR2());
+            return m_gprlo;
+        }
+
+        GPRReg asGPRhi() const
+        {
+            ASSERT(isGPR2());
+            return m_gprhi;
+        }
+    #endif
+
         void dump(PrintStream& out) const
         {
             switch (m_kind) {
@@ -301,6 +364,11 @@ private:
             case StackArgument:
                 out.print("StackArgument(", m_offset, ")");
                 break;
+#if USE(JSVALUE32_64)
+            case Gpr2:
+                out.print("GPR2(", m_gprhi, ",", m_gprlo,")");
+                break;
+#endif
             }
         }
 
@@ -311,6 +379,10 @@ private:
             switch (m_kind) {
             case Gpr:
                 return m_gpr == other.m_gpr;
+#if USE(JSVALUE32_64)
+            case Gpr2:
+                return m_gprlo == other.m_gprlo && m_gprhi == other.m_gprhi;
+#endif
             case Fpr:
                 return m_fpr == other.m_fpr;
             case Stack:
@@ -349,6 +421,12 @@ private:
                 Kind m_padFpr;
                 FPRReg m_fpr;
             };
+#if USE(JSVALUE32_64)
+            struct {
+                Kind m_padGpr2;
+                GPRReg m_gprhi, m_gprlo;
+            };
+#endif
         };
     };
 
@@ -760,9 +838,9 @@ public:
                 // Abide by calling convention instead.
                 CallInformation wasmCallInfo = wasmCallingConvention().callInformationFor(*signature, CallRole::Callee);
                 for (unsigned i = 0; i < signature->as<FunctionSignature>()->argumentCount(); ++i)
-                    m_argumentLocations.append(Location::fromArgumentLocation(wasmCallInfo.params[i]));
+                    m_argumentLocations.append(Location::fromArgumentLocation(wasmCallInfo.params[i], signature->as<FunctionSignature>()->argumentType(i).kind));
                 for (unsigned i = 0; i < signature->as<FunctionSignature>()->returnCount(); ++i)
-                    m_resultLocations.append(Location::fromArgumentLocation(wasmCallInfo.results[i]));
+                    m_resultLocations.append(Location::fromArgumentLocation(wasmCallInfo.results[i], signature->as<FunctionSignature>()->returnType(i).kind));
                 return;
             }
 
@@ -1332,7 +1410,7 @@ public:
             m_localTypes.append(type.kind);
 
             Value parameter = Value::fromLocal(type.kind, i);
-            bind(parameter, Location::fromArgumentLocation(callInfo.params[i]));
+            bind(parameter, Location::fromArgumentLocation(callInfo.params[i], type.kind));
             m_arguments.append(i);
         }
         m_localStorage = m_frameSize; // All stack slots allocated so far are locals.
@@ -6759,7 +6837,7 @@ public:
             Vector<Location, 8> returnLocationsForShuffle;
             for (unsigned i = 0; i < wasmCallInfo.results.size(); ++i) {
                 returnValuesForShuffle.append(returnValues[offset + i]);
-                returnLocationsForShuffle.append(Location::fromArgumentLocation(wasmCallInfo.results[i]));
+                returnLocationsForShuffle.append(Location::fromArgumentLocation(wasmCallInfo.results[i], returnValues[i].type().kind));
             }
             emitShuffle(returnValuesForShuffle, returnLocationsForShuffle);
             LOG_INSTRUCTION("Return", returnLocationsForShuffle);
@@ -7055,7 +7133,7 @@ public:
         }
     }
 
-    void saveValuesAcrossCall(const CallInformation& callInfo)
+    void saveValuesAcrossCall(const CallInformation& callInfo, const TypeDefinition& signature)
     {
         // Flush any values in caller-saved registers.
         for (Reg reg : m_callerSaves) {
@@ -7068,7 +7146,8 @@ public:
         // FIXME: This is kind of a quick and dirty approach to what really should be a parallel move
         // from argument to parameter locations, we may be able to avoid some stores.
         for (size_t i = 0; i < callInfo.params.size(); ++i) {
-            Location paramLocation = Location::fromArgumentLocation(callInfo.params[i]);
+            auto type = signature.as<FunctionSignature>()->argumentType(i);
+            Location paramLocation = Location::fromArgumentLocation(callInfo.params[i], type.kind);
             if (paramLocation.isRegister()) {
                 RegisterBinding binding = paramLocation.isGPR() ? m_gprBindings[paramLocation.asGPR()] : m_fprBindings[paramLocation.asFPR()];
                 if (!binding.toValue().isNone())
@@ -7089,8 +7168,8 @@ public:
     {
         // Move arguments to parameter locations.
         for (size_t i = 0; i < callInfo.params.size(); i ++) {
-            Location paramLocation = Location::fromArgumentLocation(callInfo.params[i]);
             Value argument = arguments[i];
+            Location paramLocation = Location::fromArgumentLocation(callInfo.params[i], argument.type());
             emitMove(argument, paramLocation);
             consume(argument);
         }
@@ -7101,7 +7180,7 @@ public:
     {
         for (size_t i = 0; i < callInfo.results.size(); i ++) {
             Value result = Value::fromTemp(functionType.returnType(i).kind, currentControlData().enclosedHeight() + currentControlData().implicitSlots() + m_parser->expressionStack().size() + i);
-            Location returnLocation = Location::fromArgumentLocation(callInfo.results[i]);
+            Location returnLocation = Location::fromArgumentLocation(callInfo.results[i], result.type());
             if (returnLocation.isRegister()) {
                 RegisterBinding& currentBinding = returnLocation.isGPR() ? m_gprBindings[returnLocation.asGPR()] : m_fprBindings[returnLocation.asFPR()];
                 if (currentBinding.isScratch()) {
@@ -7141,7 +7220,7 @@ public:
 
         // Preserve caller-saved registers and other info
         prepareForExceptions();
-        saveValuesAcrossCall(callInfo);
+        saveValuesAcrossCall(callInfo, *functionType);
 
         // Move argument values to parameter locations
         passParametersToCall(arguments, callInfo);
@@ -7170,7 +7249,7 @@ public:
 
         // Preserve caller-saved registers and other info
         prepareForExceptions();
-        saveValuesAcrossCall(callInfo);
+        saveValuesAcrossCall(callInfo, *functionType);
 
         // Move argument values to parameter locations
         passParametersToCall(arguments, callInfo);
@@ -7237,7 +7316,7 @@ public:
 
         // Preserve caller-saved registers and other info
         prepareForExceptions();
-        saveValuesAcrossCall(callInfo);
+        saveValuesAcrossCall(callInfo, signature);
 
         // Move argument values to parameter locations
         passParametersToCall(arguments, callInfo);
@@ -7287,12 +7366,12 @@ public:
         isSameInstance.link(&m_jit);
 
         // Since this can switch instance, we need to keep JSWebAssemblyInstance anchored in the stack.
-        m_jit.storePtr(jsCalleeAnchor, Location::fromArgumentLocation(wasmCalleeInfo.thisArgument).asAddress());
+        m_jit.storePtr(jsCalleeAnchor, Location::fromArgumentLocation(wasmCalleeInfo.thisArgument, TypeKind::Void).asAddress());
 
         // Safe to use across saveValues/passParameters since neither clobber the scratch GPR.
         m_jit.loadPtr(Address(calleeCode), wasmScratchGPR);
         prepareForExceptions();
-        saveValuesAcrossCall(wasmCalleeInfo);
+        saveValuesAcrossCall(wasmCalleeInfo, signature);
         passParametersToCall(arguments, wasmCalleeInfo);
         m_jit.call(wasmScratchGPR, WasmEntryPtrTag);
         returnValuesFromCall(results, *signature.as<FunctionSignature>(), wasmCalleeInfo);
