@@ -1811,7 +1811,7 @@ public:
             emitMove(value, Location::fromGlobal(offset));
             consume(value);
             if (isRefType(type)) {
-                m_jit.load64(Address(GPRInfo::wasmContextInstancePointer, Instance::offsetOfOwner()), wasmScratchGPR);
+                m_jit.loadPtr(Address(GPRInfo::wasmContextInstancePointer, Instance::offsetOfOwner()), wasmScratchGPR);
                 emitWriteBarrier(wasmScratchGPR);
             }
             break;
@@ -1895,6 +1895,16 @@ public:
             pointerLocation = loadIfNecessary(pointer);
         ASSERT(pointerLocation.isGPR());
 
+#if CPU(ARM_THUMB2)
+        ScratchScope<2, 0> globals(*this);
+        GPRReg wasmBaseMemoryPointer = globals.gpr(0);
+        GPRReg wasmBoundsCheckingSizeRegister = globals.gpr(1);
+        loadWebAssemblyGlobalState(wasmBaseMemoryPointer, wasmBoundsCheckingSizeRegister);
+#else
+        GPRReg wasmBaseMemoryPointer = GPRInfo::wasmBaseMemoryPointer;
+        GPRReg wasmBoundsCheckingSizeRegister = GPRInfo::wasmBoundsCheckingSizeRegister;
+#endif
+
         uint64_t boundary = static_cast<uint64_t>(sizeOfOperation) + uoffset - 1;
         switch (m_mode) {
         case MemoryMode::BoundsChecking: {
@@ -1902,8 +1912,8 @@ public:
             // Regardless of signaling, we must check that no memory access exceeds the current memory size.
             m_jit.zeroExtend32ToWord(pointerLocation.asGPR(), wasmScratchGPR);
             if (boundary)
-                m_jit.add64(TrustedImm64(boundary), wasmScratchGPR);
-            throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branch64(RelationalCondition::AboveOrEqual, wasmScratchGPR, GPRInfo::wasmBoundsCheckingSizeRegister));
+                m_jit.addPtr(TrustedImmPtr(boundary), wasmScratchGPR);
+            throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchPtr(RelationalCondition::AboveOrEqual, wasmScratchGPR, wasmBoundsCheckingSizeRegister));
             break;
         }
 
@@ -1922,18 +1932,18 @@ public:
                 uint64_t maximum = m_info.memory.maximum() ? m_info.memory.maximum().bytes() : std::numeric_limits<uint32_t>::max();
                 m_jit.zeroExtend32ToWord(pointerLocation.asGPR(), wasmScratchGPR);
                 if (boundary)
-                    m_jit.add64(TrustedImm64(boundary), wasmScratchGPR);
-                throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branch64(RelationalCondition::AboveOrEqual, wasmScratchGPR, TrustedImm64(static_cast<int64_t>(maximum))));
+                    m_jit.addPtr(TrustedImmPtr(boundary), wasmScratchGPR);
+                throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchPtr(RelationalCondition::AboveOrEqual, wasmScratchGPR, TrustedImmPtr(static_cast<int64_t>(maximum))));
             }
             break;
         }
         }
 
 #if CPU(ARM64)
-        m_jit.addZeroExtend64(GPRInfo::wasmBaseMemoryPointer, pointerLocation.asGPR(), wasmScratchGPR);
+        m_jit.addZeroExtend64(wasmBaseMemoryPointer, pointerLocation.asGPR(), wasmScratchGPR);
 #else
         m_jit.zeroExtend32ToWord(pointerLocation.asGPR(), wasmScratchGPR);
-        m_jit.addPtr(GPRInfo::wasmBaseMemoryPointer, wasmScratchGPR);
+        m_jit.addPtr(wasmBaseMemoryPointer, wasmScratchGPR);
 #endif
 
         consume(pointer);
@@ -1947,14 +1957,25 @@ public:
 
         ScratchScope<1, 0> scratches(*this);
         Location pointerLocation;
+
+#if CPU(ARM_THUMB2)
+        ScratchScope<2, 0> globals(*this);
+        GPRReg wasmBaseMemoryPointer = globals.gpr(0);
+        GPRReg wasmBoundsCheckingSizeRegister = globals.gpr(1);
+        loadWebAssemblyGlobalState(wasmBaseMemoryPointer, wasmBoundsCheckingSizeRegister);
+#else
+        GPRReg wasmBaseMemoryPointer = GPRInfo::wasmBaseMemoryPointer;
+        GPRReg wasmBoundsCheckingSizeRegister = GPRInfo::wasmBoundsCheckingSizeRegister;
+#endif
+
         if (pointer.isConst()) {
             uint64_t constantPointer = static_cast<uint64_t>(static_cast<uint32_t>(pointer.asI32()));
             uint64_t finalOffset = constantPointer + uoffset;
             if (!(finalOffset > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) || !B3::Air::Arg::isValidAddrForm(B3::Air::Move, finalOffset, Width::Width128))) {
                 switch (m_mode) {
                 case MemoryMode::BoundsChecking: {
-                    m_jit.move(TrustedImm64(constantPointer + boundary), wasmScratchGPR);
-                    throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branch64(RelationalCondition::AboveOrEqual, wasmScratchGPR, GPRInfo::wasmBoundsCheckingSizeRegister));
+                    m_jit.move(TrustedImmPtr(constantPointer + boundary), wasmScratchGPR);
+                    throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchPtr(RelationalCondition::AboveOrEqual, wasmScratchGPR, wasmBoundsCheckingSizeRegister));
                     break;
                 }
                 case MemoryMode::Signaling: {
@@ -1966,7 +1987,7 @@ public:
                     break;
                 }
                 }
-                return functor(CCallHelpers::Address(GPRInfo::wasmBaseMemoryPointer, static_cast<int32_t>(finalOffset)));
+                return functor(CCallHelpers::Address(wasmBaseMemoryPointer, static_cast<int32_t>(finalOffset)));
             }
             pointerLocation = Location::fromGPR(scratches.gpr(0));
             emitMoveConst(pointer, pointerLocation);
@@ -1980,8 +2001,8 @@ public:
             // Regardless of signaling, we must check that no memory access exceeds the current memory size.
             m_jit.zeroExtend32ToWord(pointerLocation.asGPR(), wasmScratchGPR);
             if (boundary)
-                m_jit.add64(TrustedImm64(boundary), wasmScratchGPR);
-            throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branch64(RelationalCondition::AboveOrEqual, wasmScratchGPR, GPRInfo::wasmBoundsCheckingSizeRegister));
+                m_jit.addPtr(TrustedImmPtr(boundary), wasmScratchGPR);
+            throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchPtr(RelationalCondition::AboveOrEqual, wasmScratchGPR, wasmBoundsCheckingSizeRegister));
             break;
         }
 
@@ -2000,8 +2021,8 @@ public:
                 uint64_t maximum = m_info.memory.maximum() ? m_info.memory.maximum().bytes() : std::numeric_limits<uint32_t>::max();
                 m_jit.zeroExtend32ToWord(pointerLocation.asGPR(), wasmScratchGPR);
                 if (boundary)
-                    m_jit.add64(TrustedImm64(boundary), wasmScratchGPR);
-                throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branch64(RelationalCondition::AboveOrEqual, wasmScratchGPR, TrustedImm64(static_cast<int64_t>(maximum))));
+                    m_jit.addPtr(TrustedImmPtr(boundary), wasmScratchGPR);
+                throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchPtr(RelationalCondition::AboveOrEqual, wasmScratchGPR, TrustedImmPtr(static_cast<int64_t>(maximum))));
             }
             break;
         }
@@ -2014,11 +2035,11 @@ public:
         m_jit.addZeroExtend64(GPRInfo::wasmBaseMemoryPointer, pointerLocation.asGPR(), wasmScratchGPR);
 #else
         m_jit.zeroExtend32ToWord(pointerLocation.asGPR(), wasmScratchGPR);
-        m_jit.addPtr(GPRInfo::wasmBaseMemoryPointer, wasmScratchGPR);
+        m_jit.addPtr(wasmBaseMemoryPointer, wasmScratchGPR);
 #endif
 
         if (static_cast<uint64_t>(uoffset) > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) || !B3::Air::Arg::isValidAddrForm(B3::Air::Move, uoffset, Width::Width128)) {
-            m_jit.add64(TrustedImm64(static_cast<int64_t>(uoffset)), wasmScratchGPR);
+            m_jit.addPtr(TrustedImmPtr(static_cast<int64_t>(uoffset)), wasmScratchGPR);
             return functor(Address(wasmScratchGPR));
         }
         return functor(Address(wasmScratchGPR, static_cast<int32_t>(uoffset)));
@@ -2077,7 +2098,7 @@ public:
     Address materializePointer(Location pointerLocation, uint32_t uoffset)
     {
         if (static_cast<uint64_t>(uoffset) > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) || !B3::Air::Arg::isValidAddrForm(B3::Air::Move, uoffset, Width::Width128)) {
-            m_jit.add64(TrustedImm64(static_cast<int64_t>(uoffset)), pointerLocation.asGPR());
+            m_jit.addPtr(TrustedImmPtr(static_cast<int64_t>(uoffset)), pointerLocation.asGPR());
             return Address(pointerLocation.asGPR());
         }
         return Address(pointerLocation.asGPR(), static_cast<int32_t>(uoffset));
@@ -6450,7 +6471,7 @@ public:
         m_outerLoops.append(loopIndex);
 
         static_assert(GPRInfo::nonPreservedNonArgumentGPR0 == wasmScratchGPR);
-        m_jit.move(TrustedImm64(bitwise_cast<uintptr_t>(&m_tierUp->m_counter)), wasmScratchGPR);
+        m_jit.move(TrustedImmPtr(bitwise_cast<uintptr_t>(&m_tierUp->m_counter)), wasmScratchGPR);
 
         TierUpCount::TriggerReason* forceEntryTrigger = &(m_tierUp->osrEntryTriggers().last());
         static_assert(!static_cast<uint8_t>(TierUpCount::TriggerReason::DontTrigger), "the JIT code assumes non-zero means 'enter'");
@@ -6638,8 +6659,8 @@ public:
                 case TypeKind::Array:
                 case TypeKind::Struct:
                 case TypeKind::Func: {
-                    m_jit.load64(Address(bufferGPR, JSWebAssemblyException::Payload::Storage::offsetOfData() + i * sizeof(uint64_t)), wasmScratchGPR);
-                    m_jit.store64(wasmScratchGPR, slot.asAddress());
+                    m_jit.loadPtr(Address(bufferGPR, JSWebAssemblyException::Payload::Storage::offsetOfData() + i * sizeof(uint64_t)), wasmScratchGPR);
+                    m_jit.storePtr(wasmScratchGPR, slot.asAddress());
                     break;
                 }
                 case TypeKind::F32:
@@ -7099,10 +7120,16 @@ public:
     {
         restoreWebAssemblyContextInstance();
         // FIXME: We should just store these registers on stack and load them.
-        if (!!m_info.memory) {
-            m_jit.loadPairPtr(GPRInfo::wasmContextInstancePointer, TrustedImm32(Instance::offsetOfCachedMemory()), GPRInfo::wasmBaseMemoryPointer, GPRInfo::wasmBoundsCheckingSizeRegister);
-            m_jit.cageConditionallyAndUntag(Gigacage::Primitive, GPRInfo::wasmBaseMemoryPointer, GPRInfo::wasmBoundsCheckingSizeRegister, wasmScratchGPR, /* validateAuth */ true, /* mayBeNull */ false);
+#if !CPU(ARM_THUMB2)
+        if (!!m_info.memory)
+            loadWebAssemblyGlobalState(GPRInfo::wasmBaseMemoryPointer, GPRInfo::wasmBoundsCheckingSizeRegister);
+#endif
         }
+
+    void loadWebAssemblyGlobalState(GPRReg wasmBaseMemoryPointer, GPRReg wasmBoundsCheckingSizeRegister)
+    {
+        m_jit.loadPairPtr(GPRInfo::wasmContextInstancePointer, TrustedImm32(Instance::offsetOfCachedMemory()), wasmBaseMemoryPointer, wasmBoundsCheckingSizeRegister);
+        m_jit.cageConditionallyAndUntag(Gigacage::Primitive, wasmBaseMemoryPointer, wasmBoundsCheckingSizeRegister, wasmScratchGPR, /* validateAuth */ true, /* mayBeNull */ false);
     }
 
     void flushRegistersForException()
@@ -7361,8 +7388,9 @@ public:
         // Do a context switch if needed.
         Jump isSameInstance = m_jit.branchPtr(RelationalCondition::Equal, calleeInstance, GPRInfo::wasmContextInstancePointer);
         m_jit.move(calleeInstance, GPRInfo::wasmContextInstancePointer);
-        m_jit.loadPairPtr(GPRInfo::wasmContextInstancePointer, TrustedImm32(Instance::offsetOfCachedMemory()), GPRInfo::wasmBaseMemoryPointer, GPRInfo::wasmBoundsCheckingSizeRegister);
-        m_jit.cageConditionallyAndUntag(Gigacage::Primitive, GPRInfo::wasmBaseMemoryPointer, GPRInfo::wasmBoundsCheckingSizeRegister, wasmScratchGPR, /* validateAuth */ true, /* mayBeNull */ false);
+#if !CPU(ARM_THUMB2)
+        loadWebAssemblyGlobalState(GPRInfo::wasmBaseMemoryPointer, GPRInfo::wasmBoundsCheckingSizeRegister);
+#endif
         isSameInstance.link(&m_jit);
 
         // Since this can switch instance, we need to keep JSWebAssemblyInstance anchored in the stack.
@@ -8591,7 +8619,7 @@ private:
         case TypeKind::Eqref:
         case TypeKind::Anyref:
         case TypeKind::Nullref:
-            m_jit.store64(TrustedImm64(constant.asRef()), loc.asAddress());
+            m_jit.storePtr(TrustedImmPtr(constant.asRef()), loc.asAddress());
             break;
         case TypeKind::I64:
         case TypeKind::F64:
@@ -8632,7 +8660,7 @@ private:
         case TypeKind::Eqref:
         case TypeKind::Anyref:
         case TypeKind::Nullref:
-            m_jit.move(TrustedImm64(constant.asRef()), loc.asGPR());
+            m_jit.move(TrustedImmPtr(constant.asRef()), loc.asGPR());
             break;
         case TypeKind::F32:
             m_jit.moveFloat(Imm32(constant.asI32()), loc.asFPR());
@@ -8814,7 +8842,7 @@ private:
         case TypeKind::Eqref:
         case TypeKind::Anyref:
         case TypeKind::Nullref:
-            m_jit.load64(src.asAddress(), dst.asGPR());
+            m_jit.loadPtr(src.asAddress(), dst.asGPR());
             break;
         case TypeKind::V128:
             m_jit.loadVector(src.asAddress(), dst.asFPR());
