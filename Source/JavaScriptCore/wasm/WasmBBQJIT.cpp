@@ -7806,13 +7806,17 @@ public:
     template<typename Func, size_t N>
     void emitCCall(Func function, const Vector<Value, N>& arguments)
     {
-        // Currently, we assume the Wasm calling convention is the same as the C calling convention
         Vector<Type, 1> resultTypes;
         Vector<Type> argumentTypes;
         for (const Value& value : arguments)
             argumentTypes.append(Type { value.type(), 0u });
         RefPtr<TypeDefinition> functionType = TypeInformation::typeDefinitionForFunction(resultTypes, argumentTypes);
+#if CPU(ARM64) || CPU(X86_64)
+        // Currently, we assume the Wasm calling convention is the same as the C calling convention
         CallInformation callInfo = wasmCallingConvention().callInformationFor(*functionType, CallRole::Caller);
+#elif CPU(ARM)
+        CallInformation callInfo = cCallingConventionArmThumb2().callInformationFor(*functionType, CallRole::Caller);
+#endif
         Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), callInfo.headerAndArgumentStackSizeInBytes);
         m_maxCalleeStackSize = std::max<int>(calleeStackSize, m_maxCalleeStackSize);
 
@@ -7835,13 +7839,17 @@ public:
     template<typename Func, size_t N>
     void emitCCall(Func function, const Vector<Value, N>& arguments, TypeKind returnType, Value& result)
     {
-        // Currently, we assume the Wasm calling convention is the same as the C calling convention
         Vector<Type, 1> resultTypes = { Type { returnType, 0u } };
         Vector<Type> argumentTypes;
         for (const Value& value : arguments)
             argumentTypes.append(Type { value.type(), 0u });
         RefPtr<TypeDefinition> functionType = TypeInformation::typeDefinitionForFunction(resultTypes, argumentTypes);
+#if CPU(ARM64) || CPU(X86_64)
+        // Currently, we assume the Wasm calling convention is the same as the C calling convention
         CallInformation callInfo = wasmCallingConvention().callInformationFor(*functionType, CallRole::Caller);
+#elif CPU(ARM)
+        CallInformation callInfo = cCallingConventionArmThumb2().callInformationFor(*functionType, CallRole::Caller);
+#endif
         Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), callInfo.headerAndArgumentStackSizeInBytes);
         m_maxCalleeStackSize = std::max<int>(calleeStackSize, m_maxCalleeStackSize);
 
