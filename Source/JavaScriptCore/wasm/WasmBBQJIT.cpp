@@ -4693,48 +4693,9 @@ public:
 #define PREPARE_FOR_MOD_OR_DIV
 
     template<typename IntType, bool IsMod>
-    void emitModOrDiv(Value lhs, Location, Value rhs, Location, Value result, Location)
+    void emitModOrDiv(Value, Location, Value, Location, Value, Location)
     {
-
-        static_assert(sizeof(IntType) == 4 || sizeof(IntType) == 8);
-
-        constexpr bool isSigned = std::is_signed<IntType>();
-        constexpr bool is32 = sizeof(IntType) == 4;
-
-        TypeKind returnType;
-        if constexpr (is32)
-            returnType = TypeKind::I32;
-        else
-            returnType = TypeKind::I64;
-
-        IntType (*modOrDiv)(IntType, IntType);
-        if constexpr (IsMod) {
-            if constexpr (is32) {
-                if constexpr (isSigned)
-                    modOrDiv = Math::i32_rem_s;
-                else
-                    modOrDiv = Math::i32_rem_u;
-            } else {
-                if constexpr (isSigned)
-                    modOrDiv = Math::i64_rem_s;
-                else
-                    modOrDiv = Math::i64_rem_u;
-            }
-        } else {
-            if constexpr (is32) {
-                if constexpr (isSigned)
-                    modOrDiv = Math::i32_div_s;
-                else
-                    modOrDiv = Math::i32_div_u;
-            } else {
-                if constexpr (isSigned)
-                    modOrDiv = Math::i64_div_s;
-                else
-                    modOrDiv = Math::i64_div_u;
-            }
-        }
-
-        emitCCall(modOrDiv, Vector<Value> { lhs, rhs }, returnType, result);
+        RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-300\n");
     }
 #endif
 
@@ -6020,7 +5981,8 @@ public:
                     m_jit.countPopulation32(operandLocation.asGPR(), resultLocation.asGPR());
                 else
 #endif
-                    emitCCall(&operationPopcount32, Vector<Value> { operand }, TypeKind::I32, result);
+                    UNUSED_PARAM(result);
+                    RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-301\n");
             )
         )
     }
@@ -6036,7 +5998,8 @@ public:
                     m_jit.countPopulation64(operandLocation.asGPR(), resultLocation.asGPR());
                 else
 #endif
-                    emitCCall(&operationPopcount64, Vector<Value> { operand }, TypeKind::I32, result);
+                    UNUSED_PARAM(result);
+                    RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-302\n");
             )
         )
     }
