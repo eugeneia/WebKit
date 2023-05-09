@@ -393,6 +393,7 @@ private:
     }
     ArgumentLocation marshallLocationImplGPRegPair(CallRole role, const Vector<GPRReg>& regArgs, size_t& count, size_t& stackOffset, size_t valueSize) const
     {
+        count = WTF::roundUpToMultipleOf(2, count);
         if (count+1 < regArgs.size()) {
             auto tagReg = regArgs[count];
             auto payloadReg = regArgs[count+1];
@@ -419,7 +420,7 @@ private:
     ArgumentLocation marshallLocation(CallRole role, Type valueType, size_t& gpArgumentCount, size_t& fpArgumentCount, size_t& stackOffset) const
     {
         ASSERT(isValueType(valueType));
-        unsigned alignedWidth = WTF::roundUpToMultipleOf(bytesForWidth(valueType.width()), 4);
+        unsigned alignedWidth = bytesForWidth(valueType.width());
         switch (valueType.kind) {
         case TypeKind::I64:
         case TypeKind::Funcref:
@@ -493,6 +494,8 @@ public:
             case TypeKind::Externref:
             case TypeKind::RefNull:
             case TypeKind::Ref:
+                gprIndex = WTF::roundUpToMultipleOf(2, gprIndex);
+                stackCount = WTF::roundUpToMultipleOf(2, stackCount);
                 if (gprIndex < gprCount)
                     gprIndex+=2;
                 else
@@ -519,17 +522,11 @@ public:
         return stackCount;
     }
 
-    uint32_t numberOfStackValues(const FunctionSignature& signature) const
-    {
-        return std::max(numberOfStackArguments(signature), numberOfStackResults(signature));
-    }
-
     CallInformation callInformationFor(const TypeDefinition& type, CallRole role = CallRole::Caller) const
     {
         const auto& signature = *type.as<FunctionSignature>();
         bool argumentsIncludeI64 = false;
         bool resultsIncludeI64 = false;
-        bool argumentsOrResultsIncludeV128 = false;
         size_t gpArgumentCount = 0;
         size_t fpArgumentCount = 0;
         size_t headerSize = headerSizeInBytes;
@@ -543,7 +540,7 @@ public:
         Vector<ArgumentLocation> params(signature.argumentCount());
         for (size_t i = 0; i < signature.argumentCount(); ++i) {
             argumentsIncludeI64 |= signature.argumentType(i).isI64();
-            argumentsOrResultsIncludeV128 |= signature.argumentType(i).isV128();
+            ASSERT(!signature.argumentType(i).isV128());
             params[i] = marshallLocation(role, signature.argumentType(i), gpArgumentCount, fpArgumentCount, argStackOffset);
         }
         uint32_t stackArgs = argStackOffset - headerSize;
@@ -556,14 +553,13 @@ public:
         Vector<ArgumentLocation, 1> results(signature.returnCount());
         for (size_t i = 0; i < signature.returnCount(); ++i) {
             resultsIncludeI64 |= signature.returnType(i).isI64();
-            argumentsOrResultsIncludeV128 |= signature.returnType(i).isV128();
+            ASSERT(!signature.returnType(i).isV128());
             results[i] = marshallLocation(role, signature.returnType(i), gpArgumentCount, fpArgumentCount, resultStackOffset);
         }
 
         CallInformation result(thisArgument, WTFMove(params), WTFMove(results), std::max(argStackOffset, resultStackOffset));
         result.argumentsIncludeI64 = argumentsIncludeI64;
         result.resultsIncludeI64 = resultsIncludeI64;
-        result.argumentsOrResultsIncludeV128 = argumentsOrResultsIncludeV128;
         return result;
     }
 
