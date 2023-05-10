@@ -395,8 +395,8 @@ private:
     {
         count = WTF::roundUpToMultipleOf(2, count);
         if (count+1 < regArgs.size()) {
-            auto tagReg = regArgs[count];
-            auto payloadReg = regArgs[count+1];
+            auto payloadReg = regArgs[count];
+            auto tagReg = regArgs[count+1];
             count += 2;
             return ArgumentLocation { ValueLocation { JSValueRegs::withTwoAvailableRegs(tagReg, payloadReg) }, widthForBytes(valueSize) };
         }
