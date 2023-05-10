@@ -4693,7 +4693,7 @@ public:
 #define PREPARE_FOR_MOD_OR_DIV
 
     template<typename IntType, bool IsMod>
-    void emitModOrDiv(Value lhs, Location, Value rhs, Location, Value result, Location)
+    void emitModOrDiv(Value lhs, Location lhsLocation, Value rhs, Location rhsLocation, Value result, Location)
     {
 
         static_assert(sizeof(IntType) == 4 || sizeof(IntType) == 8);
@@ -4733,6 +4733,10 @@ public:
                     modOrDiv = Math::i64_div_u;
             }
         }
+
+        // Ensure call arguments are bound so that passParametersToCall can consume them.
+        bind(lhs, lhsLocation);
+        bind(rhs, rhsLocation);
 
         emitCCall(modOrDiv, Vector<Value> { lhs, rhs }, returnType, result);
     }
