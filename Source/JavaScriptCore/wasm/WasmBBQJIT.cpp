@@ -4311,12 +4311,6 @@ public:
 
     PartialResult WARN_UNUSED_RETURN addI64Mul(Value lhs, Value rhs, Value& result)
     {
-#if USE(JSVALUE32_64)
-        // fixme: scratches not needed when lhs and rhs are const!
-        ScratchScope<2, 0> scratches(*this);
-        Location tmpHiLo = Location::fromGPR(scratches.gpr(0));
-        Location tmpLoHi = Location::fromGPR(scratches.gpr(1));
-#endif
         EMIT_BINARY(
             "I64Mul", TypeKind::I64,
             BLOCK(Value::fromI64(lhs.asI64() * rhs.asI64())),
@@ -4331,6 +4325,9 @@ public:
             )
 #else
             BLOCK(
+                ScratchScope<2, 0> scratches(*this, lhsLocation, rhsLocation, resultLocation);
+                Location tmpHiLo = Location::fromGPR(scratches.gpr(0));
+                Location tmpLoHi = Location::fromGPR(scratches.gpr(1));
                 m_jit.mul32(lhsLocation.asGPRhi(), rhsLocation.asGPRlo(), tmpHiLo.asGPR());
                 m_jit.mul32(lhsLocation.asGPRlo(), rhsLocation.asGPRhi(), tmpLoHi.asGPR());
                 m_jit.uMull32(lhsLocation.asGPRlo(), rhsLocation.asGPRlo(), resultLocation.asGPRhi(),  resultLocation.asGPRlo());
@@ -4340,6 +4337,9 @@ public:
             BLOCK(
                 ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR,  wasmScratchGPR2);
                 emitMoveConst(ImmHelpers::imm(lhs, rhs), ImmHelpers::immLocation(lhsLocation, rhsLocation));
+                ScratchScope<2, 0> scratches(*this, lhsLocation, rhsLocation, resultLocation);
+                Location tmpHiLo = Location::fromGPR(scratches.gpr(0));
+                Location tmpLoHi = Location::fromGPR(scratches.gpr(1));
                 m_jit.mul32(lhsLocation.asGPRhi(), rhsLocation.asGPRlo(), tmpHiLo.asGPR());
                 m_jit.mul32(lhsLocation.asGPRlo(), rhsLocation.asGPRhi(), tmpLoHi.asGPR());
                 m_jit.uMull32(lhsLocation.asGPRlo(), rhsLocation.asGPRlo(), resultLocation.asGPRhi(),  resultLocation.asGPRlo());
@@ -5607,21 +5607,16 @@ public:
 #else
     PartialResult emitCompareI64(const char* opcode, Value& lhs, Value& rhs, Value& result, RelationalCondition condition, bool (*comparator)(int64_t lhs, int64_t rhs))
     {
-        // fixme: scratches not needed when lhs and rhs are constant!
-        ScratchScope<1, 0> scratches(*this);
-        auto res = Location::fromGPR(scratches.gpr(0));
         EMIT_BINARY(
             opcode, TypeKind::I32,
             BLOCK(Value::fromI32(static_cast<int32_t>(comparator(lhs.asI64(), rhs.asI64())))),
             BLOCK(
-                compareI64Helper32(condition, lhsLocation, rhsLocation, res);
-                m_jit.move(res.asGPR(), resultLocation.asGPR());
+                compareI64Helper32(condition, lhsLocation, rhsLocation, resultLocation);
             ),
             BLOCK(
                 ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
                 emitMoveConst(ImmHelpers::imm(lhs, rhs), ImmHelpers::immLocation(lhsLocation, rhsLocation));
-                compareI64Helper32(condition, lhsLocation, rhsLocation, res);
-                m_jit.move(res.asGPR(), resultLocation.asGPR());
+                compareI64Helper32(condition, lhsLocation, rhsLocation, resultLocation);
             )
         )
     }
@@ -5629,10 +5624,13 @@ public:
     void compareI64Helper32(RelationalCondition condition, Location lhsLocation, Location rhsLocation, Location resultLocation)
     {
         if (condition == MacroAssembler::Equal || condition == MacroAssembler::NotEqual) {
-            m_jit.move(TrustedImm32(condition == MacroAssembler::NotEqual), resultLocation.asGPR());
+            ScratchScope<1, 0> scratches(*this, lhsLocation, rhsLocation, resultLocation);
+            auto tmp = Location::fromGPR(scratches.gpr(0));
+            m_jit.move(TrustedImm32(condition == MacroAssembler::NotEqual), tmp.asGPR());
             auto compareLo = m_jit.branch32(RelationalCondition::NotEqual, lhsLocation.asGPRhi(), rhsLocation.asGPRhi());
-            m_jit.compare32(condition, lhsLocation.asGPRlo(), rhsLocation.asGPRlo(), resultLocation.asGPR());
+            m_jit.compare32(condition, lhsLocation.asGPRlo(), rhsLocation.asGPRlo(), tmp.asGPR());
             compareLo.link(&m_jit);
+            m_jit.move(tmp.asGPR(), resultLocation.asGPR());
         } else {
             auto compareLo = m_jit.branch32(RelationalCondition::Equal, lhsLocation.asGPRhi(), rhsLocation.asGPRhi());
             // Signed to unsigned, leave the rest alone
