@@ -10199,6 +10199,12 @@ private:
                 m_preserved.add(location.asGPR(), IgnoreVectors);
             else if (location.isFPR())
                 m_preserved.add(location.asFPR(), Width::Width128);
+#if USE(JSVALUE32_64)
+            else if (location.isGPR2()) {
+                m_preserved.add(location.asGPRlo(), IgnoreVectors);
+                m_preserved.add(location.asGPRhi(), IgnoreVectors);
+            }
+#endif
             initializedPreservedSet(args...);
         }
 
