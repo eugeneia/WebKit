@@ -5264,10 +5264,12 @@ public:
             )
 #else
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-021\n");
+                shiftI64Helper32(ShiftI64Helper32Op::Lshift, lhsLocation, rhsLocation, resultLocation);
             ),
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-021b\n");
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), ImmHelpers::immLocation(lhsLocation, rhsLocation));
+                shiftI64Helper32(ShiftI64Helper32Op::Lshift, lhsLocation, rhsLocation, resultLocation);
             )
 #endif
         );
@@ -5317,10 +5319,12 @@ public:
             )
 #else
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-022\n");
+                shiftI64Helper32(ShiftI64Helper32Op::Rshift, lhsLocation, rhsLocation, resultLocation);
             ),
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-022b\n");
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), ImmHelpers::immLocation(lhsLocation, rhsLocation));
+                shiftI64Helper32(ShiftI64Helper32Op::Rshift, lhsLocation, rhsLocation, resultLocation);
             )
 #endif
         );
@@ -5370,14 +5374,72 @@ public:
             )
 #else
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-023\n");
+                shiftI64Helper32(ShiftI64Helper32Op::Urshift, lhsLocation, rhsLocation, resultLocation);
             ),
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-023b\n");
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), ImmHelpers::immLocation(lhsLocation, rhsLocation));
+                shiftI64Helper32(ShiftI64Helper32Op::Urshift, lhsLocation, rhsLocation, resultLocation);
             )
 #endif
         );
     }
+
+#if CPU(ARM_THUMB2)
+    enum class ShiftI64Helper32Op { Lshift, Urshift, Rshift };
+    void shiftI64Helper32(ShiftI64Helper32Op op, Location lhsLocation, Location rhsLocation, Location resultLocation)
+    {
+        auto shift = rhsLocation.asGPRlo();
+        m_jit.and32(TrustedImm32(63), rhsLocation.asGPRlo(), shift);
+        auto zero = m_jit.branch32(RelationalCondition::Equal, shift, TrustedImm32(0));
+        auto aboveOrEqual32 = m_jit.branch32(RelationalCondition::AboveOrEqual, shift, TrustedImm32(32));
+        // shift < 32
+        ScratchScope<1, 0> scratches(*this, lhsLocation, rhsLocation, resultLocation);                
+        auto carry = scratches.gpr(0);
+        m_jit.move(TrustedImm32(32), carry);
+        m_jit.sub32(carry, shift, carry);
+        if (op == ShiftI64Helper32Op::Lshift) {
+            ASSERT(resultLocation.asGPRhi() != shift);
+            ASSERT(resultLocation.asGPRhi() != lhsLocation.asGPRlo());
+            m_jit.lshift32(lhsLocation.asGPRhi(), shift, resultLocation.asGPRhi());
+            m_jit.urshift32(lhsLocation.asGPRlo(), carry, carry);
+            m_jit.or32(carry, resultLocation.asGPRhi());
+            m_jit.lshift32(lhsLocation.asGPRlo(), shift, resultLocation.asGPRlo());
+        } else if (op == ShiftI64Helper32Op::Urshift) {
+            m_jit.lshift32(lhsLocation.asGPRhi(), carry, carry);
+            ASSERT(resultLocation.asGPRhi() != shift);
+            ASSERT(resultLocation.asGPRhi() != lhsLocation.asGPRlo());
+            m_jit.urshift32(lhsLocation.asGPRhi(), shift, resultLocation.asGPRhi());
+            m_jit.urshift32(lhsLocation.asGPRlo(), shift, resultLocation.asGPRlo());
+            m_jit.or32(carry, resultLocation.asGPRlo());
+        } else if (op ==ShiftI64Helper32Op::Rshift) {
+            m_jit.lshift32(lhsLocation.asGPRhi(), carry, carry);
+            ASSERT(resultLocation.asGPRhi() != shift);
+            ASSERT(resultLocation.asGPRhi() != lhsLocation.asGPRlo());
+            m_jit.rshift32(lhsLocation.asGPRhi(), shift, resultLocation.asGPRhi());
+            m_jit.urshift32(lhsLocation.asGPRlo(), shift, resultLocation.asGPRlo());            
+            m_jit.or32(carry, resultLocation.asGPRlo());
+        }
+        auto done = m_jit.jump();
+        // shift >= 32
+        aboveOrEqual32.link(&m_jit);
+        m_jit.sub32(shift, TrustedImm32(32), shift);
+        if (op == ShiftI64Helper32Op::Lshift) {
+            m_jit.lshift32(lhsLocation.asGPRlo(), shift, resultLocation.asGPRhi());
+            m_jit.xor32(resultLocation.asGPRlo(), resultLocation.asGPRlo());
+        } else if (op == ShiftI64Helper32Op::Urshift) {
+            m_jit.urshift32(lhsLocation.asGPRhi(), shift, resultLocation.asGPRlo());
+            m_jit.xor32(resultLocation.asGPRhi(), resultLocation.asGPRhi());
+        } else if (op ==ShiftI64Helper32Op::Rshift) {            
+            ASSERT(resultLocation.asGPRlo() != lhsLocation.asGPRhi());
+            m_jit.rshift32(lhsLocation.asGPRhi(), shift, resultLocation.asGPRlo());
+            m_jit.rshift32(lhsLocation.asGPRhi(), TrustedImm32(31), resultLocation.asGPRhi());
+        }
+        // shift == 0
+        zero.link(&m_jit);
+        done.link(&m_jit);
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addI32Rotl(Value lhs, Value rhs, Value& result)
     {
