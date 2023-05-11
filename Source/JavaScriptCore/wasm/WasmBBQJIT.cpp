@@ -5150,10 +5150,14 @@ public:
             )
 #else
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-019\n");
+                m_jit.xor32(lhsLocation.asGPRhi(), rhsLocation.asGPRhi(), resultLocation.asGPRhi());
+                m_jit.xor32(lhsLocation.asGPRlo(), rhsLocation.asGPRlo(), resultLocation.asGPRlo());
             ),
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-019b\n");
+                m_jit.move(ImmHelpers::regLocation(lhsLocation, rhsLocation).asGPRhi(), resultLocation.asGPRhi());
+                m_jit.move(ImmHelpers::regLocation(lhsLocation, rhsLocation).asGPRlo(), resultLocation.asGPRlo());
+                m_jit.xor32(TrustedImm32(static_cast<int32_t>(ImmHelpers::imm(lhs, rhs).asI64() >> 32)), resultLocation.asGPRhi());
+                m_jit.xor32(TrustedImm32(static_cast<int32_t>(ImmHelpers::imm(lhs, rhs).asI64() & 0xffffffff)), resultLocation.asGPRlo());
             )
 #endif
         );
