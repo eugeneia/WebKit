@@ -5519,10 +5519,12 @@ public:
             )
 #else
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-024\n");
+                rotI64Helper32(RotI64Helper32Op::Left, lhsLocation, rhsLocation, resultLocation);
             ),
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-024b\n");
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), ImmHelpers::immLocation(lhsLocation, rhsLocation));
+                rotI64Helper32(RotI64Helper32Op::Left, lhsLocation, rhsLocation, resultLocation);
             )
 #endif
         );
@@ -5572,14 +5574,54 @@ public:
             )
 #else
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-025\n");
+                rotI64Helper32(RotI64Helper32Op::Right, lhsLocation, rhsLocation, resultLocation);
             ),
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-025b\n");
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), ImmHelpers::immLocation(lhsLocation, rhsLocation));
+                rotI64Helper32(RotI64Helper32Op::Right, lhsLocation, rhsLocation, resultLocation);
             )
 #endif
         );
     }
+
+#if CPU(ARM_THUMB2)
+    enum class RotI64Helper32Op { Left, Right };
+    void rotI64Helper32(RotI64Helper32Op op, Location lhsLocation, Location rhsLocation, Location resultLocation)
+    {
+        // NB: this only works as long as result is allocated in lhsLocation!
+        auto carry = rhsLocation.asGPRhi();
+        auto shift = rhsLocation.asGPRlo();
+        ScratchScope<2, 0> scratches(*this, lhsLocation, rhsLocation, resultLocation);
+        auto tmpHi = scratches.gpr(0);
+        auto tmpLo = scratches.gpr(1);
+        m_jit.move(lhsLocation.asGPRhi(), resultLocation.asGPRhi());
+        m_jit.move(lhsLocation.asGPRlo(), resultLocation.asGPRlo());
+        auto rotate = m_jit.branch32(RelationalCondition::LessThan, shift, TrustedImm32(32));
+        // swap
+        m_jit.swap(resultLocation.asGPRhi(), resultLocation.asGPRlo());
+        rotate.link(&m_jit);
+        m_jit.and32(TrustedImm32(31), shift, shift);
+        auto zero = m_jit.branch32(RelationalCondition::Equal, shift, TrustedImm32(0));
+        // rotate
+        m_jit.move(TrustedImm32(32), carry);
+        m_jit.sub32(carry, shift, carry);
+        if (op == RotI64Helper32Op::Left) {
+            m_jit.urshift32(resultLocation.asGPRhi(), carry, tmpLo);
+            m_jit.urshift32(resultLocation.asGPRlo(), carry, tmpHi);
+            m_jit.lshift32(resultLocation.asGPRhi(), shift, resultLocation.asGPRhi());
+            m_jit.lshift32(resultLocation.asGPRlo(), shift, resultLocation.asGPRlo());
+        } else if (op == RotI64Helper32Op::Right) {
+            m_jit.lshift32(resultLocation.asGPRhi(), carry, tmpLo);
+            m_jit.lshift32(resultLocation.asGPRlo(), carry, tmpHi);
+            m_jit.urshift32(resultLocation.asGPRhi(), shift, resultLocation.asGPRhi());
+            m_jit.urshift32(resultLocation.asGPRlo(), shift, resultLocation.asGPRlo());
+        }
+        m_jit.or32(tmpHi, resultLocation.asGPRhi());
+        m_jit.or32(tmpLo, resultLocation.asGPRlo());
+        zero.link(&m_jit);
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addI32Clz(Value operand, Value& result)
     {
