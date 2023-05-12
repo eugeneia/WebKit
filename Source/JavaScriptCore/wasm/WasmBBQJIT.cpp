@@ -4146,12 +4146,13 @@ public:
             )
 #else
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-014\n");
+                m_jit.add64(lhsLocation.asGPRhi(), lhsLocation.asGPRlo(), rhsLocation.asGPRhi(), rhsLocation.asGPRlo(), resultLocation.asGPRhi(), resultLocation.asGPRlo());
             ),
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-014b\n");
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), ImmHelpers::immLocation(lhsLocation, rhsLocation));
+                m_jit.add64(lhsLocation.asGPRhi(), lhsLocation.asGPRlo(), rhsLocation.asGPRhi(), rhsLocation.asGPRlo(), resultLocation.asGPRhi(), resultLocation.asGPRlo());
             )
-        
 #endif
         );
     }
