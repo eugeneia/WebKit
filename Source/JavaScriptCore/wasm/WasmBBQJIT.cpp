@@ -6014,7 +6014,9 @@ public:
             )
 #else
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-204\n");
+                GPRReg operandReg = operandLocation.isGPR() ? operandLocation.asGPR() : operandLocation.asGPRlo();
+                m_jit.signExtend8To32(operandReg, resultLocation.asGPRlo());
+                m_jit.rshift32(resultLocation.asGPRlo(), TrustedImm32(31), resultLocation.asGPRhi());
             )
 #endif
         )
@@ -6031,7 +6033,9 @@ public:
             )
 #else
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-205\n");
+                GPRReg operandReg = operandLocation.isGPR() ? operandLocation.asGPR() : operandLocation.asGPRlo();
+                m_jit.signExtend16To32(operandReg, resultLocation.asGPRlo());
+                m_jit.rshift32(resultLocation.asGPRlo(), TrustedImm32(31), resultLocation.asGPRhi());
             )
 #endif
         )
@@ -6048,7 +6052,9 @@ public:
             )
 #else
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-208\n");
+                GPRReg operandReg = operandLocation.isGPR() ? operandLocation.asGPR() : operandLocation.asGPRlo();
+                m_jit.move(operandReg, resultLocation.asGPRlo());
+                m_jit.rshift32(resultLocation.asGPRlo(), TrustedImm32(31), resultLocation.asGPRhi());
             )
 #endif
         )
@@ -6065,8 +6071,9 @@ public:
             )
 #else
             BLOCK(
-                m_jit.move(operandLocation.asGPR(), resultLocation.asGPRlo());
-                m_jit.rshift32(operandLocation.asGPR(), TrustedImm32(31), resultLocation.asGPRhi());
+                GPRReg operandReg = operandLocation.isGPR() ? operandLocation.asGPR() : operandLocation.asGPRlo();
+                m_jit.move(operandReg, resultLocation.asGPRlo());
+                m_jit.rshift32(resultLocation.asGPRlo(), TrustedImm32(31), resultLocation.asGPRhi());
             )
 #endif
         )
@@ -6083,7 +6090,8 @@ public:
             )
 #else
             BLOCK(
-                m_jit.move(operandLocation.asGPR(), resultLocation.asGPRlo());
+                GPRReg operandReg = operandLocation.isGPR() ? operandLocation.asGPR() : operandLocation.asGPRlo();
+                m_jit.move(operandReg, resultLocation.asGPRlo());
                 m_jit.xor32(resultLocation.asGPRhi(), resultLocation.asGPRhi());
             )
 #endif
