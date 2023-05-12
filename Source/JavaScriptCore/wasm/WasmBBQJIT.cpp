@@ -5742,8 +5742,11 @@ public:
             m_jit.move(tmp.asGPR(), resultLocation.asGPR());
         } else {
             auto compareLo = m_jit.branch32(RelationalCondition::Equal, lhsLocation.asGPRhi(), rhsLocation.asGPRhi());
+            m_jit.compare32(condition, lhsLocation.asGPRhi(), rhsLocation.asGPRhi(), resultLocation.asGPR());
+            auto done = m_jit.jump();
+            compareLo.link(&m_jit);
             // Signed to unsigned, leave the rest alone
-            RelationalCondition loCond;
+            RelationalCondition loCond = condition;
             switch (condition) {
             case MacroAssembler::GreaterThan:
                 loCond = MacroAssembler::Above;
@@ -5761,8 +5764,7 @@ public:
                 break;
             }
             m_jit.compare32(loCond, lhsLocation.asGPRlo(), rhsLocation.asGPRlo(), resultLocation.asGPR());
-            compareLo.link(&m_jit);
-            m_jit.compare32(condition, lhsLocation.asGPRhi(), rhsLocation.asGPRhi(), resultLocation.asGPR());
+            done.link(&m_jit);
         }
     }
 #endif
