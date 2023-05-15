@@ -4713,7 +4713,7 @@ public:
 #define PREPARE_FOR_MOD_OR_DIV
 
     template<typename IntType, bool IsMod>
-    void emitModOrDiv(Value lhs, Location lhsLocation, Value rhs, Location rhsLocation, Value result, Location)
+    void emitModOrDiv(Value, Location lhsLocation, Value, Location rhsLocation, Value, Location resultLocation)
     {
 
         static_assert(sizeof(IntType) == 4 || sizeof(IntType) == 8);
@@ -4721,11 +4721,11 @@ public:
         constexpr bool isSigned = std::is_signed<IntType>();
         constexpr bool is32 = sizeof(IntType) == 4;
 
-        TypeKind returnType;
+        TypeKind argType, returnType;
         if constexpr (is32)
-            returnType = TypeKind::I32;
+            argType = returnType = TypeKind::I32;
         else
-            returnType = TypeKind::I64;
+            argType = returnType = TypeKind::I64;
 
         IntType (*modOrDiv)(IntType, IntType);
         if constexpr (IsMod) {
@@ -4754,10 +4754,9 @@ public:
             }
         }
 
-        // Ensure call arguments are bound so that passParametersToCall can consume them.
-        bind(lhs, lhsLocation);
-        bind(rhs, rhsLocation);
-
+        auto lhs = Value::pinned(argType, lhsLocation);
+        auto rhs = Value::pinned(argType, rhsLocation);
+        auto result = Value::pinned(returnType, resultLocation);
         emitCCall(modOrDiv, Vector<Value> { lhs, rhs }, returnType, result);
     }
 #endif
