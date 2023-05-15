@@ -3713,13 +3713,32 @@ public:
             break;
         }
 #elif USE(JSVALUE32_64)
-        case TruncationKind::I64TruncF32S:
-        case TruncationKind::I64TruncF64S:
-        case TruncationKind::I64TruncF32U:
-        case TruncationKind::I64TruncF64U:
-            UNUSED_PARAM(scratch1FPR);
-            UNUSED_PARAM(scratch2FPR);
-            RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-013\n");
+        case TruncationKind::I64TruncF32S: {
+            auto operand = Value::pinned(TypeKind::F32, operandLocation);
+            auto result = Value::pinned(TypeKind::I64, operandLocation);
+            emitCCall(Math::i64_trunc_s_f32, Vector<Value> { operand }, TypeKind::I64, result);
+            break;
+        }
+        case TruncationKind::I64TruncF64S: {
+            auto operand = Value::pinned(TypeKind::F64, operandLocation);
+            auto result = Value::pinned(TypeKind::I64, operandLocation);
+            emitCCall(Math::i64_trunc_s_f64, Vector<Value> { operand }, TypeKind::I64, result);
+            break;
+        }
+        case TruncationKind::I64TruncF32U: {
+            auto operand = Value::pinned(TypeKind::F32, operandLocation);
+            auto result = Value::pinned(TypeKind::I64, operandLocation);
+            emitCCall(Math::i64_trunc_u_f32, Vector<Value> { operand }, TypeKind::I64, result);
+            break;
+        }
+        case TruncationKind::I64TruncF64U: {
+            auto operand = Value::pinned(TypeKind::F64, operandLocation);
+            auto result = Value::pinned(TypeKind::I64, operandLocation);
+            emitCCall(Math::i64_trunc_u_f64, Vector<Value> { operand }, TypeKind::I64, result);
+            break;
+        }
+        UNUSED_PARAM(scratch1FPR);
+        UNUSED_PARAM(scratch2FPR);
 #endif
         }
     }
