@@ -6516,9 +6516,15 @@ public:
         EMIT_UNARY(
             "F64Floor", TypeKind::F64,
             BLOCK(Value::fromF64(Math::floorDouble(operand.asF64()))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.floorDouble(operandLocation.asFPR(), resultLocation.asFPR());
             )
+#else
+            BLOCK(
+                emitCCall(Math::floorDouble, Vector<Value> { operand }, TypeKind::F32, result);
+            )
+#endif
         )
     }
 
@@ -6544,9 +6550,15 @@ public:
         EMIT_UNARY(
             "F64Ceil", TypeKind::F64,
             BLOCK(Value::fromF64(Math::ceilDouble(operand.asF64()))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.ceilDouble(operandLocation.asFPR(), resultLocation.asFPR());
             )
+#else
+            BLOCK(
+                emitCCall(Math::ceilDouble, Vector<Value> { operand }, TypeKind::F32, result);
+            )
+#endif
         )
     }
 
@@ -6660,9 +6672,15 @@ public:
         EMIT_UNARY(
             "F64Nearest", TypeKind::F64,
             BLOCK(Value::fromF64(std::nearbyint(operand.asF64()))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
-                m_jit.roundTowardNearestIntDouble(operandLocation.asFPR(), resultLocation.asFPR());
+                m_jit.roundTowardNearestIntDouble(operandLocation.asFPR(), resultLocation.asFPR());<    
             )
+#else
+            BLOCK(
+                emitCCall(Math::f64_nearest, Vector<Value> { operand }, TypeKind::F32, result);
+            )
+#endif
         )
     }
 
@@ -6688,9 +6706,15 @@ public:
         EMIT_UNARY(
             "F64Trunc", TypeKind::F64,
             BLOCK(Value::fromF64(Math::truncDouble(operand.asF64()))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.roundTowardZeroDouble(operandLocation.asFPR(), resultLocation.asFPR());
             )
+#else
+            BLOCK(
+                emitCCall(Math::truncDouble, Vector<Value> { operand }, TypeKind::F32, result);
+            )
+#endif
         )
     }
 
