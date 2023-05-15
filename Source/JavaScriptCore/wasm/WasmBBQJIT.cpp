@@ -9501,14 +9501,17 @@ private:
 #if USE(JSVALUE64)
             m_jit.moveFloat(Imm32(constant.asI32()), loc.asFPR());
 #elif USE(JSVALUE32_64)
-            RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-068\n");
+            m_jit.move(Imm32(constant.asI32()), wasmScratchGPR);
+            m_jit.move32ToFloat(wasmScratchGPR, loc.asFPR());
 #endif
             break;
         case TypeKind::F64:
 #if USE(JSVALUE64)
             m_jit.moveDouble(Imm64(constant.asI64()), loc.asFPR());
 #elif USE(JSVALUE32_64)
-            RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-069\n");
+            m_jit.move(Imm32(constant.asI64hi()), wasmScratchGPR2);
+            m_jit.move(Imm32(constant.asI64lo()), wasmScratchGPR);
+            m_jit.move64ToDouble(wasmScratchGPR2, wasmScratchGPR, loc.asFPR());
 #endif
             break;
         default:
