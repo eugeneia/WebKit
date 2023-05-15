@@ -6485,14 +6485,37 @@ public:
             )
 #else
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-210\n");
+                F64CopysignHelper32(lhsLocation, rhsLocation, resultLocation);
             ),
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-210b\n");
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), ImmHelpers::immLocation(lhsLocation, rhsLocation));
+                F64CopysignHelper32(lhsLocation, rhsLocation, resultLocation);
             )
 #endif
         )
     }
+
+#if CPU(ARM_THUMB2)
+    void F64CopysignHelper32 (Location lhsLocation, Location rhsLocation, Location resultLocation)
+    {
+        ScratchScope<2, 0> scratches(*this);
+        auto hi = scratches.gpr(1);
+        auto lo = scratches.gpr(0);
+        auto sign = wasmScratchGPR2;
+
+        m_jit.moveDoubleHiTo32(rhsLocation.asFPR(), sign);
+        m_jit.move(TrustedImm32(0x80000000), wasmScratchGPR);
+        m_jit.and32(wasmScratchGPR, sign);
+
+        m_jit.moveDoubleTo64(lhsLocation.asFPR(), hi, lo);
+        m_jit.move(TrustedImm32(0x7fffffff), wasmScratchGPR);
+        m_jit.and32(wasmScratchGPR, hi);
+
+        m_jit.or32(sign, hi);
+        m_jit.move64ToDouble(hi, lo, resultLocation.asFPR());
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addF32Floor(Value operand, Value& result)
     {
