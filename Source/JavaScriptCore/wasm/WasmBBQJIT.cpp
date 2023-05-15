@@ -6202,7 +6202,7 @@ public:
             )
 #else
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-030\n");
+                m_jit.moveDoubleTo64(operandLocation.asFPR(), resultLocation.asGPRhi(), resultLocation.asGPRlo());
             )
 #endif
         )
@@ -6230,7 +6230,7 @@ public:
             )
 #else
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-031\n");
+                m_jit.moveIntsToDouble(operandLocation.asGPRlo(), operandLocation.asGPRhi(), resultLocation.asFPR());
             )
 #endif
         )
@@ -6283,7 +6283,7 @@ public:
                 m_jit.zeroExtend32ToWord(operandLocation.asGPR(), wasmScratchGPR);
                 m_jit.convertUInt64ToFloat(wasmScratchGPR, resultLocation.asFPR());
 #else
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-032\n");
+                m_jit.convertUInt32ToFloat(operandLocation.asGPR(), resultLocation.asFPR());
 #endif
             )
         )
@@ -6300,7 +6300,8 @@ public:
             )
 #else
             BLOCK(
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-033\n");
+                auto arg = Value::pinned(TypeKind::I64, operandLocation);
+                emitCCall(Math::f32_convert_s_i64, Vector<Value> { arg }, TypeKind::F32, result);
             )
 #endif
         )
@@ -6317,7 +6318,8 @@ public:
 #elif CPU(ARM64)
                 m_jit.convertUInt64ToFloat(operandLocation.asGPR(), resultLocation.asFPR());
 #else
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-034\n");
+                auto arg = Value::pinned(TypeKind::I64, operandLocation);
+                emitCCall(Math::f32_convert_u_i64, Vector<Value> { arg }, TypeKind::F32, result);
 #endif
             )
         )
@@ -6348,7 +6350,7 @@ public:
                 m_jit.zeroExtend32ToWord(operandLocation.asGPR(), wasmScratchGPR);
                 m_jit.convertUInt64ToDouble(wasmScratchGPR, resultLocation.asFPR());
 #else
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-035\n");
+                m_jit.convertUInt32ToDouble(operandLocation.asGPR(), resultLocation.asFPR());
 #endif
             )
         )
@@ -6363,7 +6365,8 @@ public:
 #if CPU(X86_64) || CPU(ARM64)
                 m_jit.convertInt64ToDouble(operandLocation.asGPR(), resultLocation.asFPR());
 #else
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-036\n");
+                auto arg = Value::pinned(TypeKind::I64, operandLocation);
+                emitCCall(Math::f64_convert_s_i64, Vector<Value> { arg }, TypeKind::F64, result);
 #endif
             )
         )
@@ -6380,7 +6383,8 @@ public:
 #elif CPU(ARM64)
                 m_jit.convertUInt64ToDouble(operandLocation.asGPR(), resultLocation.asFPR());
 #else
-                RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("NYI-037\n");
+                auto arg = Value::pinned(TypeKind::I64, operandLocation);
+                emitCCall(Math::f64_convert_u_i64, Vector<Value> { arg }, TypeKind::F64, result);
 #endif
             )
         )
