@@ -6499,9 +6499,15 @@ public:
         EMIT_UNARY(
             "F32Floor", TypeKind::F32,
             BLOCK(Value::fromF32(Math::floorFloat(operand.asF32()))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.floorFloat(operandLocation.asFPR(), resultLocation.asFPR());
             )
+#else
+            BLOCK(
+                emitCCall(Math::floorFloat, Vector<Value> { operand }, TypeKind::F32, result);
+            )
+#endif
         )
     }
 
@@ -6521,9 +6527,15 @@ public:
         EMIT_UNARY(
             "F32Ceil", TypeKind::F32,
             BLOCK(Value::fromF32(Math::ceilFloat(operand.asF32()))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.ceilFloat(operandLocation.asFPR(), resultLocation.asFPR());
             )
+#else
+            BLOCK(
+                emitCCall(Math::ceilFloat, Vector<Value> { operand }, TypeKind::F32, result);
+            )
+#endif
         )
     }
 
@@ -6631,9 +6643,15 @@ public:
         EMIT_UNARY(
             "F32Nearest", TypeKind::F32,
             BLOCK(Value::fromF32(std::nearbyintf(operand.asF32()))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.roundTowardNearestIntFloat(operandLocation.asFPR(), resultLocation.asFPR());
             )
+#else
+            BLOCK(
+                emitCCall(Math::f32_nearest, Vector<Value> { operand }, TypeKind::F32, result);
+            )
+#endif
         )
     }
 
@@ -6653,9 +6671,15 @@ public:
         EMIT_UNARY(
             "F32Trunc", TypeKind::F32,
             BLOCK(Value::fromF32(Math::truncFloat(operand.asF32()))),
+#if CPU(X86_64) || CPU(ARM64)
             BLOCK(
                 m_jit.roundTowardZeroFloat(operandLocation.asFPR(), resultLocation.asFPR());
             )
+#else
+            BLOCK(
+                emitCCall(Math::truncFloat, Vector<Value> { operand }, TypeKind::F32, result);
+            )
+#endif
         )
     }
 
