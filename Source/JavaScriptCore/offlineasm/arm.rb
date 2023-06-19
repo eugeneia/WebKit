@@ -943,6 +943,8 @@ class Instruction
             $asm.puts "dmb ish"
         when "clrbp"
             $asm.puts "bic #{operands[2].armOperand}, #{operands[0].armOperand}, #{operands[1].armOperand}"
+        when "udf"
+            $asm.puts "udf #{operands[0].armOperand}"
         when "globaladdr"
             labelRef = operands[0]
             dest = operands[1]

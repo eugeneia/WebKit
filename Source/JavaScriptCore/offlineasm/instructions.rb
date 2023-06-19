@@ -396,6 +396,7 @@ ARM_INSTRUCTIONS =
      "storecondh",
      "storecondi",
      "storecond2i",
+     "udf",
     ]
 
 ARM64_INSTRUCTIONS =
