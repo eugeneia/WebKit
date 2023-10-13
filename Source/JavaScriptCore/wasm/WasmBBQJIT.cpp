@@ -95,12 +95,20 @@ public:
     static_assert(maxFunctionLocals < 1 << LocalIndexBits);
 
     static constexpr GPRReg wasmScratchGPR = GPRInfo::nonPreservedNonArgumentGPR0; // Scratch registers to hold temporaries in operations.
+#if USE(JSVALUE32_64)
+    static constexpr GPRReg wasmScratchGPR2 = GPRInfo::nonPreservedNonArgumentGPR1; // Scratch registers to hold temporaries in operations.
+#endif
     static constexpr FPRReg wasmScratchFPR = FPRInfo::nonPreservedNonArgumentFPR0;
 
 #if CPU(X86) || CPU(X86_64)
     static constexpr GPRReg shiftRCX = X86Registers::ecx;
 #else
     static constexpr GPRReg shiftRCX = InvalidGPRReg;
+#endif
+
+#if USE(JSVALUE64)
+    static constexpr GPRReg wasmBaseMemoryPointer = GPRInfo::wasmBaseMemoryPointer;
+    static constexpr GPRReg wasmBoundsCheckingSizeRegister = GPRInfo::wasmBoundsCheckingSizeRegister;
 #endif
 
 private:
@@ -111,7 +119,10 @@ private:
             Gpr = 2,
             Fpr = 3,
             Global = 4,
-            StackArgument = 5
+            StackArgument = 5,
+#if USE(JSVALUE32_64)
+            Gpr2 = 6
+#endif
         };
 
         Location()
@@ -147,6 +158,27 @@ private:
             return loc;
         }
 
+#if USE(JSVALUE32_64)
+        static Location fromGPR2(GPRReg hi, GPRReg lo)
+        {
+            ASSERT(hi != lo);
+
+            // we canonicalize hi and lo to avoid a dreadful situation of having two
+            // GPR2 locations (x, y) and (y, x) which we can't easliy generate a move between
+
+            Location loc;
+            loc.m_kind = Gpr2;
+            if (hi > lo) {
+                loc.m_gprhi = hi;
+                loc.m_gprlo = lo;
+            } else {
+                loc.m_gprhi = lo;
+                loc.m_gprlo = hi;
+            }
+            return loc;
+        }
+#endif
+
         static Location fromFPR(FPRReg fpr)
         {
             Location loc;
@@ -163,11 +195,18 @@ private:
             return loc;
         }
 
-        static Location fromArgumentLocation(ArgumentLocation argLocation)
+        static Location fromArgumentLocation(ArgumentLocation argLocation, TypeKind type)
         {
             switch (argLocation.location.kind()) {
             case ValueLocation::Kind::GPRRegister:
+#if USE(JSVALUE64)
+                UNUSED_PARAM(type);
                 return Location::fromGPR(argLocation.location.jsr().gpr());
+#else
+                if (typeNeedsGPR2(type))
+                    return Location::fromGPR2(argLocation.location.jsr().tagGPR(), argLocation.location.jsr().payloadGPR());
+                return Location::fromGPR(argLocation.location.jsr().payloadGPR());
+#endif
             case ValueLocation::Kind::FPRRegister:
                 return Location::fromFPR(argLocation.location.fpr());
             case ValueLocation::Kind::StackArgument:
@@ -188,15 +227,29 @@ private:
             return m_kind == Gpr;
         }
 
+#if USE(JSVALUE32_64)
+        bool isGPR2() const
+        {
+            return m_kind == Gpr2;
+        }
+#endif
+
         bool isFPR() const
         {
             return m_kind == Fpr;
         }
 
+#if USE(JSVALUE64)
         bool isRegister() const
         {
             return isGPR() || isFPR();
         }
+#else
+        bool isRegister() const
+        {
+            return isGPR() || isGPR2() || isFPR();
+        }
+#endif
 
         bool isStack() const
         {
@@ -280,6 +333,20 @@ private:
             return m_fpr;
         }
 
+#if USE(JSVALUE32_64)
+        GPRReg asGPRlo() const
+        {
+            ASSERT(isGPR2());
+            return m_gprlo;
+        }
+
+        GPRReg asGPRhi() const
+        {
+            ASSERT(isGPR2());
+            return m_gprhi;
+        }
+#endif
+
         void dump(PrintStream& out) const
         {
             switch (m_kind) {
@@ -301,6 +368,11 @@ private:
             case StackArgument:
                 out.print("StackArgument(", m_offset, ")");
                 break;
+#if USE(JSVALUE32_64)
+            case Gpr2:
+                out.print("GPR2(", m_gprhi, ",", m_gprlo, ")");
+                break;
+#endif
             }
         }
 
@@ -311,6 +383,10 @@ private:
             switch (m_kind) {
             case Gpr:
                 return m_gpr == other.m_gpr;
+#if USE(JSVALUE32_64)
+            case Gpr2:
+                return m_gprlo == other.m_gprlo && m_gprhi == other.m_gprhi;
+#endif
             case Fpr:
                 return m_fpr == other.m_fpr;
             case Stack:
@@ -344,6 +420,12 @@ private:
                 Kind m_padFpr;
                 FPRReg m_fpr;
             };
+#if USE(JSVALUE32_64)
+            struct {
+                Kind m_padGpr2;
+                GPRReg m_gprhi, m_gprlo;
+            };
+#endif
         };
     };
 
@@ -370,7 +452,15 @@ private:
         return type == TypeKind::F32 || type == TypeKind::F64 || type == TypeKind::V128;
     }
 
+#if USE(JSVALUE32_64)
+    static bool typeNeedsGPR2(TypeKind type)
+    {
+        return toValueKind(type) == TypeKind::I64;
+    }
+#endif
+
 public:
+#if USE(JSVALUE64)
     static ALWAYS_INLINE uint32_t sizeOfType(TypeKind type)
     {
         switch (type) {
@@ -406,6 +496,43 @@ public:
         }
         return 0;
     }
+#else
+    static ALWAYS_INLINE uint32_t sizeOfType(TypeKind type)
+    {
+        switch (type) {
+        case TypeKind::I32:
+        case TypeKind::F32:
+        case TypeKind::I31ref:
+            return sizeof(EncodedJSValue);
+        case TypeKind::I64:
+        case TypeKind::F64:
+            return 8;
+        case TypeKind::V128:
+            return 16;
+        case TypeKind::Func:
+        case TypeKind::Funcref:
+        case TypeKind::Ref:
+        case TypeKind::RefNull:
+        case TypeKind::Rec:
+        case TypeKind::Sub:
+        case TypeKind::Subfinal:
+        case TypeKind::Struct:
+        case TypeKind::Structref:
+        case TypeKind::Externref:
+        case TypeKind::Array:
+        case TypeKind::Arrayref:
+        case TypeKind::Eqref:
+        case TypeKind::Anyref:
+        case TypeKind::Nullref:
+        case TypeKind::Nullfuncref:
+        case TypeKind::Nullexternref:
+            return sizeof(EncodedJSValue);
+        case TypeKind::Void:
+            return 0;
+        }
+        return 0;
+    }
+#endif
 
     static TypeKind toValueKind(TypeKind kind)
     {
@@ -488,6 +615,20 @@ public:
             ASSERT(m_kind == Const);
             return m_i32;
         }
+
+#if USE(JSVALUE32_64)
+        ALWAYS_INLINE int32_t asI64hi() const
+        {
+            ASSERT(m_kind == Const);
+            return m_i32_pair.hi;
+        }
+
+        ALWAYS_INLINE int32_t asI64lo() const
+        {
+            ASSERT(m_kind == Const);
+            return m_i32_pair.lo;
+        }
+#endif
 
         ALWAYS_INLINE int64_t asI64() const
         {
@@ -661,6 +802,11 @@ public:
     private:
         union {
             int32_t m_i32;
+#if USE(JSVALUE32_64)
+            struct {
+                int32_t lo, hi;
+            } m_i32_pair;
+#endif
             int64_t m_i64;
             float m_f32;
             double m_f64;
@@ -810,32 +956,11 @@ public:
                 // Abide by calling convention instead.
                 CallInformation wasmCallInfo = wasmCallingConvention().callInformationFor(*signature, CallRole::Callee);
                 for (unsigned i = 0; i < signature->as<FunctionSignature>()->argumentCount(); ++i)
-                    m_argumentLocations.append(Location::fromArgumentLocation(wasmCallInfo.params[i]));
+                    m_argumentLocations.append(Location::fromArgumentLocation(wasmCallInfo.params[i], signature->as<FunctionSignature>()->argumentType(i).kind));
                 for (unsigned i = 0; i < signature->as<FunctionSignature>()->returnCount(); ++i)
-                    m_resultLocations.append(Location::fromArgumentLocation(wasmCallInfo.results[i]));
+                    m_resultLocations.append(Location::fromArgumentLocation(wasmCallInfo.results[i], signature->as<FunctionSignature>()->returnType(i).kind));
                 return;
             }
-
-            // This function is intentionally not using implicitSlots since arguments and results should not include implicit slot.
-            auto allocateArgumentOrResult = [&](BBQJIT& generator, TypeKind type, unsigned i, RegisterSet& remainingGPRs, RegisterSet& remainingFPRs) -> Location {
-                switch (type) {
-                case TypeKind::V128:
-                case TypeKind::F32:
-                case TypeKind::F64: {
-                    if (remainingFPRs.isEmpty())
-                        return generator.canonicalSlot(Value::fromTemp(type, this->enclosedHeight() + i));
-                    auto reg = *remainingFPRs.begin();
-                    remainingFPRs.remove(reg);
-                    return Location::fromFPR(reg.fpr());
-                }
-                default:
-                    if (remainingGPRs.isEmpty())
-                        return generator.canonicalSlot(Value::fromTemp(type, this->enclosedHeight() + i));
-                    auto reg = *remainingGPRs.begin();
-                    remainingGPRs.remove(reg);
-                    return Location::fromGPR(reg.gpr());
-                }
-            };
 
             const auto& functionSignature = signature->as<FunctionSignature>();
             if (!isAnyCatch(*this)) {
@@ -852,6 +977,64 @@ public:
             for (unsigned i = 0; i < functionSignature->returnCount(); ++i)
                 m_resultLocations.append(allocateArgumentOrResult(generator, functionSignature->returnType(i).kind, i, gprSetCopy, fprSetCopy));
         }
+
+        // This function is intentionally not using implicitSlots since arguments and results should not include implicit slot.
+#if USE(JSVALUE64)
+        Location allocateArgumentOrResult(BBQJIT& generator, TypeKind type, unsigned i, RegisterSet& remainingGPRs, RegisterSet& remainingFPRs)
+        {
+            switch (type) {
+            case TypeKind::V128:
+            case TypeKind::F32:
+            case TypeKind::F64: {
+                if (remainingFPRs.isEmpty())
+                    return generator.canonicalSlot(Value::fromTemp(type, this->enclosedHeight() + i));
+                auto reg = *remainingFPRs.begin();
+                remainingFPRs.remove(reg);
+                return Location::fromFPR(reg.fpr());
+            }
+            default:
+                if (remainingGPRs.isEmpty())
+                    return generator.canonicalSlot(Value::fromTemp(type, this->enclosedHeight() + i));
+                auto reg = *remainingGPRs.begin();
+                remainingGPRs.remove(reg);
+                return Location::fromGPR(reg.gpr());
+            }
+        }
+#else
+        Location allocateArgumentOrResult(BBQJIT& generator, TypeKind type, unsigned i, RegisterSet& remainingGPRs, RegisterSet& remainingFPRs)
+        {
+            switch (type) {
+            case TypeKind::V128:
+            case TypeKind::F32:
+            case TypeKind::F64: {
+                if (remainingFPRs.isEmpty())
+                    return generator.canonicalSlot(Value::fromTemp(type, this->enclosedHeight() + i));
+                auto reg = *remainingFPRs.begin();
+                remainingFPRs.remove(reg);
+                return Location::fromFPR(reg.fpr());
+            }
+            default:
+                if (typeNeedsGPR2(type)) {
+                    auto next = remainingGPRs.begin();
+                    if (next != remainingGPRs.end()) {
+                        auto lo = (*next);
+                        if (++next != remainingGPRs.end()) {
+                            auto hi = (*next);
+                            remainingGPRs.remove(lo);
+                            remainingGPRs.remove(hi);
+                            return Location::fromGPR2(hi.gpr(), lo.gpr());
+                        }
+                    }
+                    return generator.canonicalSlot(Value::fromTemp(type, this->enclosedHeight() + i));
+                }
+                if (remainingGPRs.isEmpty())
+                    return generator.canonicalSlot(Value::fromTemp(type, this->enclosedHeight() + i));
+                auto reg = *remainingGPRs.begin();
+                remainingGPRs.remove(reg);
+                return Location::fromGPR(reg.gpr());
+            }
+        }
+#endif
 
         template<typename Stack>
         void flushAtBlockBoundary(BBQJIT& generator, unsigned targetArity, Stack& expressionStack, bool endOfWasmBlock)
@@ -1344,6 +1527,11 @@ public:
         RegisterSetBuilder::macroClobberedFPRs().forEach([&](Reg reg) {
             fprSetBuilder.remove(reg);
         });
+#if USE(JSVALUE32_64) && CPU(ARM_NEON)
+        // Remove NEON fprs
+        for (auto reg = ARMRegisters::d16; reg <= ARMRegisters::d31; reg = MacroAssembler::nextFPRegister(reg))
+            fprSetBuilder.remove(reg);
+#endif
         // TODO: handle callee-saved registers better.
         RegisterSetBuilder::vmCalleeSaveRegisters().forEach([&](Reg reg) {
             fprSetBuilder.remove(reg);
@@ -1353,6 +1541,9 @@ public:
         RegisterSetBuilder callerSaveFprs = fprSetBuilder;
 
         gprSetBuilder.remove(wasmScratchGPR);
+#if USE(JSVALUE32_64)
+        gprSetBuilder.remove(wasmScratchGPR2);
+#endif
         fprSetBuilder.remove(wasmScratchFPR);
 
         m_gprSet = m_validGPRs = gprSetBuilder.buildAndValidate();
@@ -1381,7 +1572,7 @@ public:
             m_localTypes.append(type.kind);
 
             Value parameter = Value::fromLocal(type.kind, i);
-            bind(parameter, Location::fromArgumentLocation(callInfo.params[i]));
+            bind(parameter, Location::fromArgumentLocation(callInfo.params[i], type.kind));
             m_arguments.append(i);
         }
         m_localStorage = m_frameSize; // All stack slots allocated so far are locals.
@@ -1468,12 +1659,20 @@ public:
 #define BBQ_STUB { RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("Unimplemented instruction!"); return PartialResult(); }
 #define BBQ_CONTROL_STUB { RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("Unimplemented instruction!"); return ControlData(); }
 
+#if USE(JSVALUE64)
     Value instanceValue()
     {
         return Value::pinned(TypeKind::I64, Location::fromGPR(GPRInfo::wasmContextInstancePointer));
     }
+#else
+    Value instanceValue()
+    {
+        return Value::pinned(TypeKind::I32, Location::fromGPR(GPRInfo::wasmContextInstancePointer));
+    }
+#endif
 
     // Tables
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addTableGet(unsigned tableIndex, Value index, Value& result)
     {
         // FIXME: Emit this inline <https://bugs.webkit.org/show_bug.cgi?id=198506>.
@@ -1495,6 +1694,31 @@ public:
         throwExceptionIf(ExceptionType::OutOfBoundsTableAccess, m_jit.branchTest64(ResultCondition::Zero, resultLocation.asGPR()));
         return { };
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addTableGet(unsigned tableIndex, Value index, Value& result)
+    {
+        // FIXME: Emit this inline <https://bugs.webkit.org/show_bug.cgi?id=198506>.
+        ASSERT(index.type() == TypeKind::I32);
+        TypeKind returnType = m_info.tables[tableIndex].wasmType().kind;
+        ASSERT(typeKindSizeInBytes(returnType) == 8);
+
+        Vector<Value, 8> arguments = {
+            instanceValue(),
+            Value::fromI32(tableIndex),
+            index
+        };
+        result = topValue(returnType);
+        emitCCall(&operationGetWasmTableElement, arguments, result);
+        Location resultLocation = allocate(result);
+
+        LOG_INSTRUCTION("TableGet", tableIndex, index, RESULT(result));
+
+        m_jit.or32(resultLocation.asGPRhi(), resultLocation.asGPRlo(), wasmScratchGPR);
+        throwExceptionIf(ExceptionType::OutOfBoundsTableAccess, m_jit.branchTest32(ResultCondition::Zero, wasmScratchGPR));
+
+        return { };
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addTableSet(unsigned tableIndex, Value index, Value value)
     {
@@ -1677,6 +1901,7 @@ public:
         return Value::fromTemp(TypeKind::Externref, control.enclosedHeight());
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN getGlobal(uint32_t index, Value& result)
     {
         const Wasm::GlobalInformation& global = m_info.globals[index];
@@ -1741,6 +1966,75 @@ public:
 
         return { };
     }
+#else
+    PartialResult WARN_UNUSED_RETURN getGlobal(uint32_t index, Value& result)
+    {
+        const Wasm::GlobalInformation& global = m_info.globals[index];
+        Type type = global.type;
+
+        int32_t offset = Instance::offsetOfGlobalPtr(m_info.importFunctionCount(), m_info.tableCount(), index);
+        Value globalValue = Value::pinned(type.kind, Location::fromGlobal(offset));
+
+        switch (global.bindingMode) {
+        case Wasm::GlobalInformation::BindingMode::EmbeddedInInstance:
+            result = topValue(type.kind);
+            emitLoad(globalValue, loadIfNecessary(result));
+            break;
+        case Wasm::GlobalInformation::BindingMode::Portable:
+            ASSERT(global.mutability == Wasm::Mutability::Mutable);
+            m_jit.loadPtr(Address(GPRInfo::wasmContextInstancePointer, offset), wasmScratchGPR);
+            result = topValue(type.kind);
+            Location resultLocation = allocate(result);
+            switch (type.kind) {
+            case TypeKind::I32:
+                m_jit.load32(Address(wasmScratchGPR), resultLocation.asGPR());
+                break;
+            case TypeKind::I31ref:
+                m_jit.load32(Address(wasmScratchGPR), resultLocation.asGPRlo());
+                m_jit.move(TrustedImm32(JSValue::Int32Tag), resultLocation.asGPRhi());
+                break;
+            case TypeKind::I64:
+                m_jit.loadPair32(Address(wasmScratchGPR), resultLocation.asGPRlo(), resultLocation.asGPRhi());
+                break;
+            case TypeKind::F32:
+                m_jit.loadFloat(Address(wasmScratchGPR), resultLocation.asFPR());
+                break;
+            case TypeKind::F64:
+                m_jit.loadDouble(Address(wasmScratchGPR), resultLocation.asFPR());
+                break;
+            case TypeKind::V128:
+                m_jit.loadVector(Address(wasmScratchGPR), resultLocation.asFPR());
+                break;
+            case TypeKind::Func:
+            case TypeKind::Funcref:
+            case TypeKind::Ref:
+            case TypeKind::RefNull:
+            case TypeKind::Rec:
+            case TypeKind::Sub:
+            case TypeKind::Subfinal:
+            case TypeKind::Struct:
+            case TypeKind::Structref:
+            case TypeKind::Externref:
+            case TypeKind::Array:
+            case TypeKind::Arrayref:
+            case TypeKind::Eqref:
+            case TypeKind::Anyref:
+            case TypeKind::Nullref:
+            case TypeKind::Nullfuncref:
+            case TypeKind::Nullexternref:
+                m_jit.loadPair32(Address(wasmScratchGPR), resultLocation.asGPRlo(), resultLocation.asGPRhi());
+                break;
+            case TypeKind::Void:
+                break;
+            }
+            break;
+        }
+
+        LOG_INSTRUCTION("GetGlobal", index, RESULT(result));
+
+        return { };
+    }
+#endif
 
     void emitWriteBarrier(GPRReg cellGPR)
     {
@@ -1777,6 +2071,7 @@ public:
         belowBlackThreshold.link(&m_jit);
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN setGlobal(uint32_t index, Value value)
     {
         const Wasm::GlobalInformation& global = m_info.globals[index];
@@ -1864,6 +2159,102 @@ public:
 
         return { };
     }
+#else
+    PartialResult WARN_UNUSED_RETURN setGlobal(uint32_t index, Value value)
+    {
+        const Wasm::GlobalInformation& global = m_info.globals[index];
+        Type type = global.type;
+
+        int32_t offset = Instance::offsetOfGlobalPtr(m_info.importFunctionCount(), m_info.tableCount(), index);
+        Location valueLocation = locationOf(value);
+
+        switch (global.bindingMode) {
+        case Wasm::GlobalInformation::BindingMode::EmbeddedInInstance: {
+            emitMove(value, Location::fromGlobal(offset));
+            consume(value);
+            if (isRefType(type)) {
+                m_jit.load32(Address(GPRInfo::wasmContextInstancePointer, Instance::offsetOfOwner()), wasmScratchGPR);
+                emitWriteBarrier(wasmScratchGPR);
+            }
+            break;
+        }
+        case Wasm::GlobalInformation::BindingMode::Portable: {
+            ASSERT(global.mutability == Wasm::Mutability::Mutable);
+            m_jit.loadPtr(Address(GPRInfo::wasmContextInstancePointer, offset), wasmScratchGPR);
+
+            Location valueLocation;
+            if (value.isConst() && value.isFloat()) {
+                ScratchScope<0, 1> scratches(*this);
+                valueLocation = Location::fromFPR(scratches.fpr(0));
+                emitMoveConst(value, valueLocation);
+            } else if (value.isConst()) {
+                if (typeNeedsGPR2(value.type())) {
+                    ScratchScope<2, 0> scratches(*this);
+                    valueLocation = Location::fromGPR2(scratches.gpr(1), scratches.gpr(0));
+                } else {
+                    ScratchScope<1, 0> scratches(*this);
+                    valueLocation = Location::fromGPR(scratches.gpr(0));
+                }
+                emitMoveConst(value, valueLocation);
+            } else
+                valueLocation = loadIfNecessary(value);
+            ASSERT(valueLocation.isRegister());
+            consume(value);
+
+            switch (type.kind) {
+            case TypeKind::I32:
+                m_jit.store32(valueLocation.asGPR(), Address(wasmScratchGPR));
+                break;
+            case TypeKind::I31ref:
+                m_jit.store32(valueLocation.asGPRlo(), Address(wasmScratchGPR));
+                break;
+            case TypeKind::I64:
+                m_jit.storePair32(valueLocation.asGPRlo(), valueLocation.asGPRhi(), Address(wasmScratchGPR));
+                break;
+            case TypeKind::F32:
+                m_jit.storeFloat(valueLocation.asFPR(), Address(wasmScratchGPR));
+                break;
+            case TypeKind::F64:
+                m_jit.storeDouble(valueLocation.asFPR(), Address(wasmScratchGPR));
+                break;
+            case TypeKind::V128:
+                m_jit.storeVector(valueLocation.asFPR(), Address(wasmScratchGPR));
+                break;
+            case TypeKind::Func:
+            case TypeKind::Funcref:
+            case TypeKind::Ref:
+            case TypeKind::RefNull:
+            case TypeKind::Rec:
+            case TypeKind::Sub:
+            case TypeKind::Subfinal:
+            case TypeKind::Struct:
+            case TypeKind::Structref:
+            case TypeKind::Externref:
+            case TypeKind::Array:
+            case TypeKind::Arrayref:
+            case TypeKind::Eqref:
+            case TypeKind::Anyref:
+            case TypeKind::Nullref:
+            case TypeKind::Nullfuncref:
+            case TypeKind::Nullexternref:
+                m_jit.storePair32(valueLocation.asGPRlo(), valueLocation.asGPRhi(), Address(wasmScratchGPR));
+                break;
+            case TypeKind::Void:
+                break;
+            }
+            if (isRefType(type)) {
+                m_jit.loadPtr(Address(wasmScratchGPR, Wasm::Global::offsetOfOwner() - Wasm::Global::offsetOfValue()), wasmScratchGPR);
+                emitWriteBarrier(wasmScratchGPR);
+            }
+            break;
+        }
+        }
+
+        LOG_INSTRUCTION("SetGlobal", index, value, valueLocation);
+
+        return { };
+    }
+#endif
 
     // Memory
     inline Location emitCheckAndPreparePointer(Value pointer, uint32_t uoffset, uint32_t sizeOfOperation)
@@ -1877,6 +2268,13 @@ public:
             pointerLocation = loadIfNecessary(pointer);
         ASSERT(pointerLocation.isGPR());
 
+#if USE(JSVALUE32_64)
+        ScratchScope<2, 0> globals(*this);
+        GPRReg wasmBaseMemoryPointer = globals.gpr(0);
+        GPRReg wasmBoundsCheckingSizeRegister = globals.gpr(1);
+        loadWebAssemblyGlobalState(wasmBaseMemoryPointer, wasmBoundsCheckingSizeRegister);
+#endif
+
         uint64_t boundary = static_cast<uint64_t>(sizeOfOperation) + uoffset - 1;
         switch (m_mode) {
         case MemoryMode::BoundsChecking: {
@@ -1884,8 +2282,8 @@ public:
             // Regardless of signaling, we must check that no memory access exceeds the current memory size.
             m_jit.zeroExtend32ToWord(pointerLocation.asGPR(), wasmScratchGPR);
             if (boundary)
-                m_jit.add64(TrustedImm64(boundary), wasmScratchGPR);
-            throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branch64(RelationalCondition::AboveOrEqual, wasmScratchGPR, GPRInfo::wasmBoundsCheckingSizeRegister));
+                m_jit.addPtr(TrustedImmPtr(boundary), wasmScratchGPR);
+            throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchPtr(RelationalCondition::AboveOrEqual, wasmScratchGPR, wasmBoundsCheckingSizeRegister));
             break;
         }
 
@@ -1904,18 +2302,18 @@ public:
                 uint64_t maximum = m_info.memory.maximum() ? m_info.memory.maximum().bytes() : std::numeric_limits<uint32_t>::max();
                 m_jit.zeroExtend32ToWord(pointerLocation.asGPR(), wasmScratchGPR);
                 if (boundary)
-                    m_jit.add64(TrustedImm64(boundary), wasmScratchGPR);
-                throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branch64(RelationalCondition::AboveOrEqual, wasmScratchGPR, TrustedImm64(static_cast<int64_t>(maximum))));
+                    m_jit.addPtr(TrustedImmPtr(boundary), wasmScratchGPR);
+                throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchPtr(RelationalCondition::AboveOrEqual, wasmScratchGPR, TrustedImmPtr(static_cast<int64_t>(maximum))));
             }
             break;
         }
         }
 
 #if CPU(ARM64)
-        m_jit.addZeroExtend64(GPRInfo::wasmBaseMemoryPointer, pointerLocation.asGPR(), wasmScratchGPR);
+        m_jit.addZeroExtend64(wasmBaseMemoryPointer, pointerLocation.asGPR(), wasmScratchGPR);
 #else
         m_jit.zeroExtend32ToWord(pointerLocation.asGPR(), wasmScratchGPR);
-        m_jit.addPtr(GPRInfo::wasmBaseMemoryPointer, wasmScratchGPR);
+        m_jit.addPtr(wasmBaseMemoryPointer, wasmScratchGPR);
 #endif
 
         consume(pointer);
@@ -1929,14 +2327,22 @@ public:
 
         ScratchScope<1, 0> scratches(*this);
         Location pointerLocation;
+
+#if USE(JSVALUE32_64)
+        ScratchScope<2, 0> globals(*this);
+        GPRReg wasmBaseMemoryPointer = globals.gpr(0);
+        GPRReg wasmBoundsCheckingSizeRegister = globals.gpr(1);
+        loadWebAssemblyGlobalState(wasmBaseMemoryPointer, wasmBoundsCheckingSizeRegister);
+#endif
+
         if (pointer.isConst()) {
             uint64_t constantPointer = static_cast<uint64_t>(static_cast<uint32_t>(pointer.asI32()));
             uint64_t finalOffset = constantPointer + uoffset;
             if (!(finalOffset > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) || !B3::Air::Arg::isValidAddrForm(B3::Air::Move, finalOffset, Width::Width128))) {
                 switch (m_mode) {
                 case MemoryMode::BoundsChecking: {
-                    m_jit.move(TrustedImm64(constantPointer + boundary), wasmScratchGPR);
-                    throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branch64(RelationalCondition::AboveOrEqual, wasmScratchGPR, GPRInfo::wasmBoundsCheckingSizeRegister));
+                    m_jit.move(TrustedImmPtr(constantPointer + boundary), wasmScratchGPR);
+                    throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchPtr(RelationalCondition::AboveOrEqual, wasmScratchGPR, wasmBoundsCheckingSizeRegister));
                     break;
                 }
                 case MemoryMode::Signaling: {
@@ -1948,7 +2354,7 @@ public:
                     break;
                 }
                 }
-                return functor(CCallHelpers::Address(GPRInfo::wasmBaseMemoryPointer, static_cast<int32_t>(finalOffset)));
+                return functor(CCallHelpers::Address(wasmBaseMemoryPointer, static_cast<int32_t>(finalOffset)));
             }
             pointerLocation = Location::fromGPR(scratches.gpr(0));
             emitMoveConst(pointer, pointerLocation);
@@ -1962,8 +2368,13 @@ public:
             // Regardless of signaling, we must check that no memory access exceeds the current memory size.
             m_jit.zeroExtend32ToWord(pointerLocation.asGPR(), wasmScratchGPR);
             if (boundary)
-                m_jit.add64(TrustedImm64(boundary), wasmScratchGPR);
-            throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branch64(RelationalCondition::AboveOrEqual, wasmScratchGPR, GPRInfo::wasmBoundsCheckingSizeRegister));
+#if USE(JSVALUE64)
+                m_jit.addPtr(TrustedImmPtr(boundary), wasmScratchGPR);
+#else
+                // NB: On 32-bit we have to check the addition for overflow
+                throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchAdd32(ResultCondition::Carry, wasmScratchGPR, TrustedImm32(boundary), wasmScratchGPR));
+#endif
+            throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchPtr(RelationalCondition::AboveOrEqual, wasmScratchGPR, wasmBoundsCheckingSizeRegister));
             break;
         }
 
@@ -1982,8 +2393,8 @@ public:
                 uint64_t maximum = m_info.memory.maximum() ? m_info.memory.maximum().bytes() : std::numeric_limits<uint32_t>::max();
                 m_jit.zeroExtend32ToWord(pointerLocation.asGPR(), wasmScratchGPR);
                 if (boundary)
-                    m_jit.add64(TrustedImm64(boundary), wasmScratchGPR);
-                throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branch64(RelationalCondition::AboveOrEqual, wasmScratchGPR, TrustedImm64(static_cast<int64_t>(maximum))));
+                    m_jit.addPtr(TrustedImmPtr(boundary), wasmScratchGPR);
+                throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchPtr(RelationalCondition::AboveOrEqual, wasmScratchGPR, TrustedImmPtr(static_cast<int64_t>(maximum))));
             }
             break;
         }
@@ -1991,16 +2402,16 @@ public:
 
 #if CPU(ARM64)
         if (!(static_cast<uint64_t>(uoffset) > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) || !B3::Air::Arg::isValidAddrForm(B3::Air::Move, uoffset, Width::Width128)))
-            return functor(CCallHelpers::BaseIndex(GPRInfo::wasmBaseMemoryPointer, pointerLocation.asGPR(), CCallHelpers::TimesOne, static_cast<int32_t>(uoffset), CCallHelpers::Extend::ZExt32));
+            return functor(CCallHelpers::BaseIndex(wasmBaseMemoryPointer, pointerLocation.asGPR(), CCallHelpers::TimesOne, static_cast<int32_t>(uoffset), CCallHelpers::Extend::ZExt32));
 
-        m_jit.addZeroExtend64(GPRInfo::wasmBaseMemoryPointer, pointerLocation.asGPR(), wasmScratchGPR);
+        m_jit.addZeroExtend64(wasmBaseMemoryPointer, pointerLocation.asGPR(), wasmScratchGPR);
 #else
         m_jit.zeroExtend32ToWord(pointerLocation.asGPR(), wasmScratchGPR);
-        m_jit.addPtr(GPRInfo::wasmBaseMemoryPointer, wasmScratchGPR);
+        m_jit.addPtr(wasmBaseMemoryPointer, wasmScratchGPR);
 #endif
 
         if (static_cast<uint64_t>(uoffset) > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) || !B3::Air::Arg::isValidAddrForm(B3::Air::Move, uoffset, Width::Width128)) {
-            m_jit.add64(TrustedImm64(static_cast<int64_t>(uoffset)), wasmScratchGPR);
+            m_jit.addPtr(TrustedImmPtr(static_cast<int64_t>(uoffset)), wasmScratchGPR);
             return functor(Address(wasmScratchGPR));
         }
         return functor(Address(wasmScratchGPR, static_cast<int32_t>(uoffset)));
@@ -2059,7 +2470,7 @@ public:
     Address materializePointer(Location pointerLocation, uint32_t uoffset)
     {
         if (static_cast<uint64_t>(uoffset) > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) || !B3::Air::Arg::isValidAddrForm(B3::Air::Move, uoffset, Width::Width128)) {
-            m_jit.add64(TrustedImm64(static_cast<int64_t>(uoffset)), pointerLocation.asGPR());
+            m_jit.addPtr(TrustedImmPtr(static_cast<int64_t>(uoffset)), pointerLocation.asGPR());
             return Address(pointerLocation.asGPR());
         }
         return Address(pointerLocation.asGPR(), static_cast<int32_t>(uoffset));
@@ -2073,6 +2484,7 @@ public:
         "I64Load8S", "I64Load8U", "I64Load16S", "I64Load16U", "I64Load32S", "I64Load32U"
     };
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN load(LoadOpType loadOp, Value pointer, Value& result, uint32_t uoffset)
     {
         if (UNLIKELY(sumOverflows<uint32_t>(uoffset, sizeOfLoadOp(loadOp)))) {
@@ -2167,6 +2579,109 @@ public:
 
         return { };
     }
+#else
+    PartialResult WARN_UNUSED_RETURN load(LoadOpType loadOp, Value pointer, Value& result, uint32_t uoffset)
+    {
+        if (UNLIKELY(sumOverflows<uint32_t>(uoffset, sizeOfLoadOp(loadOp)))) {
+            // FIXME: Same issue as in AirIRGenerator::load(): https://bugs.webkit.org/show_bug.cgi?id=166435
+            emitThrowException(ExceptionType::OutOfBoundsMemoryAccess);
+            consume(pointer);
+
+            // Unreachable at runtime, so we just add a constant that makes the types work out.
+            switch (loadOp) {
+            case LoadOpType::I32Load8S:
+            case LoadOpType::I32Load16S:
+            case LoadOpType::I32Load:
+            case LoadOpType::I32Load16U:
+            case LoadOpType::I32Load8U:
+                result = Value::fromI32(0);
+                break;
+            case LoadOpType::I64Load8S:
+            case LoadOpType::I64Load8U:
+            case LoadOpType::I64Load16S:
+            case LoadOpType::I64Load32U:
+            case LoadOpType::I64Load32S:
+            case LoadOpType::I64Load:
+            case LoadOpType::I64Load16U:
+                result = Value::fromI64(0);
+                break;
+            case LoadOpType::F32Load:
+                result = Value::fromF32(0);
+                break;
+            case LoadOpType::F64Load:
+                result = Value::fromF64(0);
+                break;
+            }
+        } else {
+            result = emitCheckAndPrepareAndMaterializePointerApply(pointer, uoffset, sizeOfLoadOp(loadOp), [&](auto location) -> Value {
+                consume(pointer);
+                Value result = topValue(typeOfLoadOp(loadOp));
+                Location resultLocation = allocate(result);
+
+                switch (loadOp) {
+                case LoadOpType::I32Load8S:
+                    m_jit.load8SignedExtendTo32(location, resultLocation.asGPR());
+                    break;
+                case LoadOpType::I64Load8S:
+                    m_jit.load8SignedExtendTo32(location, resultLocation.asGPRlo());
+                    m_jit.rshift32(resultLocation.asGPRlo(), TrustedImm32(31), resultLocation.asGPRhi());
+                    break;
+                case LoadOpType::I32Load8U:
+                    m_jit.load8(location, resultLocation.asGPR());
+                    break;
+                case LoadOpType::I64Load8U:
+                    m_jit.load8(location, resultLocation.asGPRlo());
+                    m_jit.xor32(resultLocation.asGPRhi(), resultLocation.asGPRhi());
+                    break;
+                case LoadOpType::I32Load16S:
+                    m_jit.load16SignedExtendTo32(location, resultLocation.asGPR());
+                    break;
+                case LoadOpType::I64Load16S:
+                    m_jit.load16SignedExtendTo32(location, resultLocation.asGPRlo());
+                    m_jit.rshift32(resultLocation.asGPRlo(), TrustedImm32(31), resultLocation.asGPRhi());
+                    break;
+                case LoadOpType::I32Load16U:
+                    m_jit.load16(location, resultLocation.asGPR());
+                    break;
+                case LoadOpType::I64Load16U:
+                    m_jit.load16(location, resultLocation.asGPRlo());
+                    m_jit.xor32(resultLocation.asGPRhi(), resultLocation.asGPRhi());
+                    break;
+                case LoadOpType::I32Load:
+                    m_jit.load32(location, resultLocation.asGPR());
+                    break;
+                case LoadOpType::I64Load32U:
+                    m_jit.load32(location, resultLocation.asGPRlo());
+                    m_jit.xor32(resultLocation.asGPRhi(), resultLocation.asGPRhi());
+                    break;
+                case LoadOpType::I64Load32S:
+                    m_jit.load32(location, resultLocation.asGPRlo());
+                    m_jit.rshift32(resultLocation.asGPRlo(), TrustedImm32(31), resultLocation.asGPRhi());
+                    break;
+                case LoadOpType::I64Load:
+                    m_jit.load32(location, resultLocation.asGPRlo());
+                    m_jit.load32(location.withOffset(4), resultLocation.asGPRhi());
+                    break;
+                case LoadOpType::F32Load:
+                    m_jit.load32(location, wasmScratchGPR);
+                    m_jit.move32ToFloat(wasmScratchGPR, resultLocation.asFPR());
+                    break;
+                case LoadOpType::F64Load:
+                    m_jit.load32(location.withOffset(4), wasmScratchGPR2);
+                    m_jit.load32(location, wasmScratchGPR);
+                    m_jit.move64ToDouble(wasmScratchGPR2, wasmScratchGPR, resultLocation.asFPR());
+                    break;
+                }
+
+                return result;
+            });
+        }
+
+        LOG_INSTRUCTION(LOAD_OP_NAMES[(unsigned)loadOp - (unsigned)I32Load], pointer, uoffset, RESULT(result));
+
+        return { };
+    }
+#endif
 
     inline uint32_t sizeOfStoreOp(StoreOpType op)
     {
@@ -2194,6 +2709,7 @@ public:
         "I64Store8", "I64Store16", "I64Store32",
     };
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN store(StoreOpType storeOp, Value pointer, Value value, uint32_t uoffset)
     {
         Location valueLocation = locationOf(value);
@@ -2250,6 +2766,82 @@ public:
 
         return { };
     }
+#else
+    PartialResult WARN_UNUSED_RETURN store(StoreOpType storeOp, Value pointer, Value value, uint32_t uoffset)
+    {
+        Location valueLocation = locationOf(value);
+        if (UNLIKELY(sumOverflows<uint32_t>(uoffset, sizeOfStoreOp(storeOp)))) {
+            // FIXME: Same issue as in AirIRGenerator::load(): https://bugs.webkit.org/show_bug.cgi?id=166435
+            emitThrowException(ExceptionType::OutOfBoundsMemoryAccess);
+            consume(pointer);
+            consume(value);
+        } else {
+            emitCheckAndPrepareAndMaterializePointerApply(pointer, uoffset, sizeOfStoreOp(storeOp), [&](auto location) -> void {
+                Location valueLocation;
+                if (value.isConst() && value.isFloat()) {
+                    ScratchScope<0, 1> scratches(*this);
+                    valueLocation = Location::fromFPR(scratches.fpr(0));
+                    emitMoveConst(value, valueLocation);
+                } else if (value.isConst() && typeNeedsGPR2(value.type())) {
+                    ScratchScope<2, 0> scratches(*this);
+                    valueLocation = Location::fromGPR2(scratches.gpr(1), scratches.gpr(0));
+                    emitMoveConst(value, valueLocation);
+                } else if (value.isConst()) {
+                    ScratchScope<1, 0> scratches(*this);
+                    valueLocation = Location::fromGPR(scratches.gpr(0));
+                    emitMoveConst(value, valueLocation);
+                } else
+                    valueLocation = loadIfNecessary(value);
+                ASSERT(valueLocation.isRegister());
+
+                consume(value);
+                consume(pointer);
+
+                switch (storeOp) {
+                case StoreOpType::I64Store8:
+                    m_jit.store8(valueLocation.asGPRlo(), location);
+                    return;
+                case StoreOpType::I32Store8:
+                    m_jit.store8(valueLocation.asGPR(), location);
+                    return;
+                case StoreOpType::I64Store16:
+                    m_jit.store16(valueLocation.asGPRlo(), location);
+                    return;
+                case StoreOpType::I32Store16:
+                    m_jit.store16(valueLocation.asGPR(), location);
+                    return;
+                case StoreOpType::I64Store32:
+                    m_jit.store32(valueLocation.asGPRlo(), location);
+                    return;
+                case StoreOpType::I32Store:
+                    m_jit.store32(valueLocation.asGPR(), location);
+                    return;
+                case StoreOpType::I64Store:
+                    m_jit.store32(valueLocation.asGPRlo(), location);
+                    m_jit.store32(valueLocation.asGPRhi(), location.withOffset(4));
+                    return;
+                case StoreOpType::F32Store: {
+                    ScratchScope<1, 0> scratches(*this);
+                    m_jit.moveFloatTo32(valueLocation.asFPR(), scratches.gpr(0));
+                    m_jit.store32(scratches.gpr(0), location);
+                    return;
+                }
+                case StoreOpType::F64Store: {
+                    ScratchScope<1, 0> scratches(*this);
+                    m_jit.moveDoubleTo64(valueLocation.asFPR(), wasmScratchGPR2, scratches.gpr(0));
+                    m_jit.store32(scratches.gpr(0), location);
+                    m_jit.store32(wasmScratchGPR2, location.withOffset(4));
+                    return;
+                }
+                }
+            });
+        }
+
+        LOG_INSTRUCTION(STORE_OP_NAMES[(unsigned)storeOp - (unsigned)I32Store], pointer, uoffset, value, valueLocation);
+
+        return { };
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addGrowMemory(Value delta, Value& result)
     {
@@ -2372,6 +2964,7 @@ public:
         return bytesForWidth(accessWidth(op));
     }
 
+#if USE(JSVALUE64)
     void emitSanitizeAtomicResult(ExtAtomicOpType op, TypeKind resultType, GPRReg source, GPRReg dest)
     {
         switch (resultType) {
@@ -2422,7 +3015,144 @@ public:
     {
         emitSanitizeAtomicResult(op, resultType, result, result);
     }
+#else
+    void emitSanitizeAtomicResult(ExtAtomicOpType op, TypeKind resultType, Location source, Location dest)
+    {
+        switch (resultType) {
+        case TypeKind::I64: {
+            switch (accessWidth(op)) {
+            case Width8:
+                m_jit.zeroExtend8To32(source.asGPR(), dest.asGPRlo());
+                m_jit.xor32(dest.asGPRhi(), dest.asGPRhi());
+                return;
+            case Width16:
+                m_jit.zeroExtend16To32(source.asGPR(), dest.asGPRlo());
+                m_jit.xor32(dest.asGPRhi(), dest.asGPRhi());
+                return;
+            case Width32:
+                m_jit.zeroExtend32ToWord(source.asGPR(), dest.asGPRlo());
+                m_jit.xor32(dest.asGPRhi(), dest.asGPRhi());
+                return;
+            case Width64:
+                ASSERT(dest.asGPRlo() != source.asGPRhi());
+                m_jit.move(source.asGPRlo(), dest.asGPRlo());
+                m_jit.move(source.asGPRhi(), dest.asGPRhi());
+                return;
+            case Width128:
+                RELEASE_ASSERT_NOT_REACHED();
+                return;
+            }
+            return;
+        }
+        case TypeKind::I32:
+            switch (accessWidth(op)) {
+            case Width8:
+                m_jit.zeroExtend8To32(source.asGPR(), dest.asGPR());
+                return;
+            case Width16:
+                m_jit.zeroExtend16To32(source.asGPR(), dest.asGPR());
+                return;
+            case Width32:
+                m_jit.move(source.asGPR(), dest.asGPR());
+                return;
+            case Width64:
+                m_jit.move(source.asGPRlo(), dest.asGPR());
+                return;
+            case Width128:
+                RELEASE_ASSERT_NOT_REACHED();
+                return;
+            }
+            return;
+        default:
+            RELEASE_ASSERT_NOT_REACHED();
+            return;
+        }
+    }
+#endif
 
+#if USE(JSVALUE32_64)
+    void emitSanitizeAtomicOperand(ExtAtomicOpType op, TypeKind operandType, Location source, Location dest)
+    {
+        switch (operandType) {
+        case TypeKind::I64:
+            switch (accessWidth(op)) {
+            case Width8:
+                m_jit.zeroExtend8To32(source.asGPRlo(), dest.asGPR());
+                return;
+            case Width16:
+                m_jit.zeroExtend16To32(source.asGPRlo(), dest.asGPR());
+                return;
+            case Width32:
+                m_jit.move(source.asGPRlo(), dest.asGPR());
+                return;
+            case Width64:
+                ASSERT(dest.asGPRlo() != source.asGPRhi());
+                m_jit.move(source.asGPRlo(), dest.asGPRlo());
+                m_jit.move(source.asGPRhi(), dest.asGPRhi());
+                return;
+            case Width128:
+                RELEASE_ASSERT_NOT_REACHED();
+                return;
+            }
+            return;
+        case TypeKind::I32:
+            switch (accessWidth(op)) {
+            case Width8:
+                m_jit.zeroExtend8To32(source.asGPR(), dest.asGPR());
+                return;
+            case Width16:
+                m_jit.zeroExtend16To32(source.asGPR(), dest.asGPR());
+                return;
+            case Width32:
+                m_jit.move(source.asGPR(), dest.asGPR());
+                return;
+            case Width64:
+                m_jit.move(source.asGPR(), dest.asGPRlo());
+                m_jit.xor32(dest.asGPRhi(), dest.asGPRhi());
+                return;
+            case Width128:
+                RELEASE_ASSERT_NOT_REACHED();
+                return;
+            }
+            return;
+        default:
+            RELEASE_ASSERT_NOT_REACHED();
+            return;
+        }
+
+    }
+
+    Location emitMaterializeAtomicOperand(Value value)
+    {
+        Location valueLocation;
+
+        if (value.isConst()) {
+            switch (value.type()) {
+            case TypeKind::I64: {
+                ScratchScope<2, 0> scratches(*this);
+                valueLocation = Location::fromGPR2(scratches.gpr(1), scratches.gpr(0));
+                break;
+            }
+            case TypeKind::I32: {
+                ScratchScope<1, 0> scratches(*this);
+                valueLocation = Location::fromGPR(scratches.gpr(0));
+                break;
+            }
+            default:
+                RELEASE_ASSERT_NOT_REACHED();
+            }
+            emitMoveConst(value, valueLocation);
+        } else
+            valueLocation = loadIfNecessary(value);
+        ASSERT(valueLocation.isRegister());
+
+        consume(value);
+
+        return valueLocation;
+    }
+#endif
+
+#if USE(JSVALUE64)
     template<typename Functor>
     void emitAtomicOpGeneric(ExtAtomicOpType op, Address address, GPRReg oldGPR, GPRReg scratchGPR, const Functor& functor)
     {
@@ -2513,7 +3243,66 @@ public:
         m_jit.branchTest32(ResultCondition::NonZero, scratchGPR).linkTo(reloopLabel, &m_jit);
 #endif
     }
+#else
+template<typename Functor>
+    void emitAtomicOpGeneric(ExtAtomicOpType op, Address address, Location old, Location cur, const Functor& functor)
+    {
+        Width accessWidth = this->accessWidth(op);
 
+        // We need a CAS loop or a LL/SC loop. Using prepare/attempt jargon, we want:
+        //
+        // Block #reloop:
+        //     Prepare
+        //     Operation
+        //     Attempt
+        //   Successors: Then:#done, Else:#reloop
+        // Block #done:
+        //     Move oldValue, result
+
+        // Prepare
+        auto reloopLabel = m_jit.label();
+        switch (accessWidth) {
+        case Width8:
+            m_jit.loadLink8(address, old.asGPR());
+            break;
+        case Width16:
+            m_jit.loadLink16(address, old.asGPR());
+            break;
+        case Width32:
+            m_jit.loadLink32(address, old.asGPR());
+            break;
+        case Width64:
+            m_jit.loadLinkPair32(address, old.asGPRlo(), old.asGPRhi());
+            break;
+        case Width128:
+            RELEASE_ASSERT_NOT_REACHED();
+            break;
+        }
+
+        // Operation
+        functor(old, cur);
+
+        switch (accessWidth) {
+        case Width8:
+            m_jit.storeCond8(cur.asGPR(), address, wasmScratchGPR2);
+            break;
+        case Width16:
+            m_jit.storeCond16(cur.asGPR(), address, wasmScratchGPR2);
+            break;
+        case Width32:
+            m_jit.storeCond32(cur.asGPR(), address, wasmScratchGPR2);
+            break;
+        case Width64:
+            m_jit.storeCondPair32(cur.asGPRlo(), cur.asGPRhi(), address, wasmScratchGPR2);
+            break;
+        case Width128:
+            RELEASE_ASSERT_NOT_REACHED();
+        }
+        m_jit.branchTest32(ResultCondition::NonZero, wasmScratchGPR2).linkTo(reloopLabel, &m_jit);
+    }
+#endif
+
+#if USE(JSVALUE64)
     Value WARN_UNUSED_RETURN emitAtomicLoadOp(ExtAtomicOpType loadOp, Type valueType, Location pointer, uint32_t uoffset)
     {
         ASSERT(pointer.isGPR());
@@ -2605,6 +3394,82 @@ public:
 
         return result;
     }
+#else
+    Value WARN_UNUSED_RETURN emitAtomicLoadOp(ExtAtomicOpType loadOp, Type valueType, Location pointer, uint32_t uoffset)
+    {
+        ASSERT(pointer.isGPR());
+
+        // For Atomic access, we need SimpleAddress (uoffset = 0).
+        if (uoffset)
+            m_jit.addPtr(TrustedImmPtr(static_cast<int64_t>(uoffset)), pointer.asGPR());
+        Address address = Address(pointer.asGPR());
+
+        if (accessWidth(loadOp) != Width8)
+            throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchTest32(ResultCondition::NonZero, pointer.asGPR(), TrustedImm32(sizeOfAtomicOpMemoryAccess(loadOp) - 1)));
+
+        Value result = topValue(valueType.kind);
+        Location resultLocation;
+        Location old, cur;
+
+        switch (valueType.kind) {
+        case TypeKind::I64:
+            switch (canonicalWidth(accessWidth(loadOp))) {
+            case Width32: {
+                resultLocation = allocate(result);
+                cur = Location::fromGPR(resultLocation.asGPRlo());
+                ScratchScope<1, 0> scratches(*this);
+                old = Location::fromGPR(scratches.gpr(0));
+                break;
+            }
+            case Width64: {
+                resultLocation = allocate(result);
+                cur = resultLocation;
+                ScratchScope<2, 0> scratches(*this);
+                old = Location::fromGPR2(scratches.gpr(1), scratches.gpr(0));
+                break;
+            }
+            default:
+                RELEASE_ASSERT_NOT_REACHED();
+            }
+            break;
+        case TypeKind::I32:
+            switch (canonicalWidth(accessWidth(loadOp))) {
+            case Width32: {
+                resultLocation = allocate(result);
+                cur = resultLocation;
+                ScratchScope<1, 0> scratches(*this);
+                old = Location::fromGPR(scratches.gpr(0));
+                break;
+            }
+            case Width64: {
+                ScratchScope<4, 0> scratches(*this);
+                cur = Location::fromGPR2(scratches.gpr(1), scratches.gpr(0));
+                resultLocation = Location::fromGPR(scratches.gpr(0));
+                ASSERT(resultLocation == allocateWithHint(result, resultLocation));
+                old = Location::fromGPR2(scratches.gpr(3), scratches.gpr(2));
+                break;
+            }
+            default:
+                RELEASE_ASSERT_NOT_REACHED();
+            }
+            break;
+        default:
+            RELEASE_ASSERT_NOT_REACHED();
+        }
+
+        emitAtomicOpGeneric(loadOp, address, old, cur, [&](Location old, Location cur) {
+            if (old.isGPR2()) {
+                ASSERT(cur.asGPRlo() != old.asGPRhi());
+                m_jit.move(old.asGPRlo(), cur.asGPRlo());
+                m_jit.move(old.asGPRhi(), cur.asGPRhi());
+            } else
+                m_jit.move(old.asGPR(), cur.asGPR());
+        });
+        emitSanitizeAtomicResult(loadOp, valueType.kind, cur, resultLocation);
+
+        return result;
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN atomicLoad(ExtAtomicOpType loadOp, Type valueType, ExpressionType pointer, ExpressionType& result, uint32_t uoffset)
     {
@@ -2621,6 +3486,7 @@ public:
         return { };
     }
 
+#if USE(JSVALUE64)
     void emitAtomicStoreOp(ExtAtomicOpType storeOp, Type, Location pointer, Value value, uint32_t uoffset)
     {
         ASSERT(pointer.isGPR());
@@ -2721,6 +3587,55 @@ public:
             break;
         }
     }
+#else
+    void emitAtomicStoreOp(ExtAtomicOpType storeOp, Type, Location pointer, Value value, uint32_t uoffset)
+    {
+        ASSERT(pointer.isGPR());
+
+        // For Atomic access, we need SimpleAddress (uoffset = 0).
+        if (uoffset)
+            m_jit.addPtr(TrustedImmPtr(static_cast<int64_t>(uoffset)), pointer.asGPR());
+        Address address = Address(pointer.asGPR());
+
+        if (accessWidth(storeOp) != Width8)
+            throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchTest32(ResultCondition::NonZero, pointer.asGPR(), TrustedImm32(sizeOfAtomicOpMemoryAccess(storeOp) - 1)));
+
+        Location source, old, cur;
+        switch (canonicalWidth(accessWidth(storeOp))) {
+        case Width32: {
+            Location valueLocation = emitMaterializeAtomicOperand(value);
+            ScratchScope<1, 0> scratchSource(*this);
+            source = Location::fromGPR(scratchSource.gpr(0));
+            emitSanitizeAtomicOperand(storeOp, value.type(), valueLocation, source);
+            ScratchScope<2, 0> scratchTmp(*this);
+            old = Location::fromGPR(scratchTmp.gpr(0));
+            cur = Location::fromGPR(scratchTmp.gpr(1));
+            break;
+        }
+        case Width64: {
+            Location valueLocation = emitMaterializeAtomicOperand(value);
+            ScratchScope<2, 0> scratchSource(*this);
+            source = Location::fromGPR2(scratchSource.gpr(1), scratchSource.gpr(0));
+            emitSanitizeAtomicOperand(storeOp, value.type(), valueLocation, source);
+            ScratchScope<4, 0> scratchTmp(*this);
+            old = Location::fromGPR2(scratchTmp.gpr(1), scratchTmp.gpr(0));
+            cur = Location::fromGPR2(scratchTmp.gpr(3), scratchTmp.gpr(2));
+            break;
+        }
+        default:
+            RELEASE_ASSERT_NOT_REACHED();
+        }
+
+        emitAtomicOpGeneric(storeOp, address, old, cur, [&](Location, Location cur) {
+            if (source.isGPR2()) {
+                ASSERT(cur.asGPRlo() != source.asGPRhi());
+                m_jit.move(source.asGPRlo(), cur.asGPRlo());
+                m_jit.move(source.asGPRhi(), cur.asGPRhi());
+            } else
+                m_jit.move(source.asGPR(), cur.asGPR());
+        });
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN atomicStore(ExtAtomicOpType storeOp, Type valueType, ExpressionType pointer, ExpressionType value, uint32_t uoffset)
     {
@@ -2738,6 +3653,7 @@ public:
         return { };
     }
 
+#if USE(JSVALUE64)
     Value emitAtomicBinaryRMWOp(ExtAtomicOpType op, Type valueType, Location pointer, Value value, uint32_t uoffset)
     {
         ASSERT(pointer.isGPR());
@@ -3100,6 +4016,173 @@ public:
         emitSanitizeAtomicResult(op, valueType.kind, resultLocation.asGPR());
         return result;
     }
+#else
+    Value emitAtomicBinaryRMWOp(ExtAtomicOpType op, Type valueType, Location pointer, Value value, uint32_t uoffset)
+    {
+        ASSERT(pointer.isGPR());
+
+        // For Atomic access, we need SimpleAddress (uoffset = 0).
+        if (uoffset)
+            m_jit.addPtr(TrustedImmPtr(static_cast<int64_t>(uoffset)), pointer.asGPR());
+        Address address = Address(pointer.asGPR());
+
+        if (accessWidth(op) != Width8)
+            throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchTest32(ResultCondition::NonZero, pointer.asGPR(), TrustedImm32(sizeOfAtomicOpMemoryAccess(op) - 1)));
+
+        Value result = topValue(valueType.kind);
+        Location resultLocation;
+        Location operand, old, cur;
+
+        switch (valueType.kind) {
+        case TypeKind::I64:
+            switch (canonicalWidth(accessWidth(op))) {
+            case Width32: {
+                resultLocation = allocate(result);
+                old = Location::fromGPR(resultLocation.asGPRlo());
+                Location valueLocation = emitMaterializeAtomicOperand(value);
+                ScratchScope<1, 0> scratchOperand(*this, old);
+                operand = Location::fromGPR(scratchOperand.gpr(0));
+                emitSanitizeAtomicOperand(op, value.type(), valueLocation, operand);
+                ScratchScope<1, 0> scratchTmp(*this, old);
+                cur = Location::fromGPR(scratchTmp.gpr(0));
+                break;
+            }
+            case Width64: {
+                resultLocation = allocate(result);
+                old = resultLocation;
+                Location valueLocation = emitMaterializeAtomicOperand(value);
+                ScratchScope<2, 0> scratchOperand(*this, old);
+                operand = Location::fromGPR2(scratchOperand.gpr(1), scratchOperand.gpr(0));
+                emitSanitizeAtomicOperand(op, value.type(), valueLocation, operand);
+                ScratchScope<2, 0> scratchTmp(*this, old);
+                cur = Location::fromGPR2(scratchTmp.gpr(1), scratchTmp.gpr(0));
+                break;
+            }
+            default:
+                RELEASE_ASSERT_NOT_REACHED();
+            }
+            break;
+        case TypeKind::I32:
+            switch (canonicalWidth(accessWidth(op))) {
+            case Width32: {
+                resultLocation = allocate(result);
+                old = resultLocation;
+                Location valueLocation = emitMaterializeAtomicOperand(value);
+                ScratchScope<1, 0> scratchOperand(*this, old);
+                operand = Location::fromGPR(scratchOperand.gpr(0));
+                emitSanitizeAtomicOperand(op, value.type(), valueLocation, operand);
+                ScratchScope<1, 0> scratchTmp(*this, old);
+                cur = Location::fromGPR(scratchTmp.gpr(0));
+                break;
+            }
+            case Width64: {
+                ScratchScope<2, 0> scratchResult(*this);
+                old = Location::fromGPR2(scratchResult.gpr(1), scratchResult.gpr(0));
+                resultLocation = Location::fromGPR(scratchResult.gpr(0));
+                ASSERT(resultLocation == allocateWithHint(result, resultLocation));
+                Location valueLocation = emitMaterializeAtomicOperand(value);
+                ScratchScope<2, 0> scratchOperand(*this);
+                operand = Location::fromGPR2(scratchOperand.gpr(1), scratchOperand.gpr(0));
+                emitSanitizeAtomicOperand(op, value.type(), valueLocation, operand);
+                ScratchScope<2, 0> scratchTmp(*this);
+                cur = Location::fromGPR2(scratchTmp.gpr(1), scratchTmp.gpr(0));
+                break;
+            }
+            default:
+                RELEASE_ASSERT_NOT_REACHED();
+            }
+            break;
+        default:
+            RELEASE_ASSERT_NOT_REACHED();
+        }
+
+        emitAtomicOpGeneric(op, address, old, cur, [&](Location old, Location cur) {
+            switch (op) {
+            case ExtAtomicOpType::I32AtomicRmw16AddU:
+            case ExtAtomicOpType::I32AtomicRmw8AddU:
+            case ExtAtomicOpType::I32AtomicRmwAdd:
+            case ExtAtomicOpType::I64AtomicRmw8AddU:
+            case ExtAtomicOpType::I64AtomicRmw16AddU:
+            case ExtAtomicOpType::I64AtomicRmw32AddU:
+                m_jit.add32(old.asGPR(), operand.asGPR(), cur.asGPR());
+                break;
+            case ExtAtomicOpType::I64AtomicRmwAdd:
+                m_jit.add64(old.asGPRhi(), old.asGPRlo(),
+                    operand.asGPRhi(), operand.asGPRlo(),
+                    cur.asGPRhi(), cur.asGPRlo());
+                break;
+            case ExtAtomicOpType::I32AtomicRmw8SubU:
+            case ExtAtomicOpType::I32AtomicRmw16SubU:
+            case ExtAtomicOpType::I32AtomicRmwSub:
+            case ExtAtomicOpType::I64AtomicRmw8SubU:
+            case ExtAtomicOpType::I64AtomicRmw16SubU:
+            case ExtAtomicOpType::I64AtomicRmw32SubU:
+                m_jit.sub32(old.asGPR(), operand.asGPR(), cur.asGPR());
+                break;
+            case ExtAtomicOpType::I64AtomicRmwSub:
+                m_jit.sub64(old.asGPRhi(), old.asGPRlo(),
+                    operand.asGPRhi(), operand.asGPRlo(),
+                    cur.asGPRhi(), cur.asGPRlo());
+                break;
+            case ExtAtomicOpType::I32AtomicRmw8AndU:
+            case ExtAtomicOpType::I32AtomicRmw16AndU:
+            case ExtAtomicOpType::I32AtomicRmwAnd:
+            case ExtAtomicOpType::I64AtomicRmw8AndU:
+            case ExtAtomicOpType::I64AtomicRmw16AndU:
+            case ExtAtomicOpType::I64AtomicRmw32AndU:
+                m_jit.and32(old.asGPR(), operand.asGPR(), cur.asGPR());
+                break;
+            case ExtAtomicOpType::I64AtomicRmwAnd:
+                m_jit.and32(old.asGPRhi(), operand.asGPRhi(), cur.asGPRhi());
+                m_jit.and32(old.asGPRlo(), operand.asGPRlo(), cur.asGPRlo());
+                break;
+            case ExtAtomicOpType::I32AtomicRmw8OrU:
+            case ExtAtomicOpType::I32AtomicRmw16OrU:
+            case ExtAtomicOpType::I32AtomicRmwOr:
+            case ExtAtomicOpType::I64AtomicRmw8OrU:
+            case ExtAtomicOpType::I64AtomicRmw16OrU:
+            case ExtAtomicOpType::I64AtomicRmw32OrU:
+                m_jit.or32(old.asGPR(), operand.asGPR(), cur.asGPR());
+                break;
+            case ExtAtomicOpType::I64AtomicRmwOr:
+                m_jit.or32(old.asGPRhi(), operand.asGPRhi(), cur.asGPRhi());
+                m_jit.or32(old.asGPRlo(), operand.asGPRlo(), cur.asGPRlo());
+                break;
+            case ExtAtomicOpType::I32AtomicRmw8XorU:
+            case ExtAtomicOpType::I32AtomicRmw16XorU:
+            case ExtAtomicOpType::I32AtomicRmwXor:
+            case ExtAtomicOpType::I64AtomicRmw8XorU:
+            case ExtAtomicOpType::I64AtomicRmw16XorU:
+            case ExtAtomicOpType::I64AtomicRmw32XorU:
+                m_jit.xor32(old.asGPR(), operand.asGPR(), cur.asGPR());
+                break;
+            case ExtAtomicOpType::I64AtomicRmwXor:
+                m_jit.xor32(old.asGPRhi(), operand.asGPRhi(), cur.asGPRhi());
+                m_jit.xor32(old.asGPRlo(), operand.asGPRlo(), cur.asGPRlo());
+                break;
+            case ExtAtomicOpType::I32AtomicRmw8XchgU:
+            case ExtAtomicOpType::I32AtomicRmw16XchgU:
+            case ExtAtomicOpType::I32AtomicRmwXchg:
+            case ExtAtomicOpType::I64AtomicRmw8XchgU:
+            case ExtAtomicOpType::I64AtomicRmw16XchgU:
+            case ExtAtomicOpType::I64AtomicRmw32XchgU:
+                m_jit.move(operand.asGPR(), cur.asGPR());
+                break;
+            case ExtAtomicOpType::I64AtomicRmwXchg:
+                ASSERT(cur.asGPRlo() != operand.asGPRhi());
+                m_jit.move(operand.asGPRlo(), cur.asGPRlo());
+                m_jit.move(operand.asGPRhi(), cur.asGPRhi());
+                break;
+            default:
+                RELEASE_ASSERT_NOT_REACHED();
+                break;
+            }
+        });
+        emitSanitizeAtomicResult(op, valueType.kind, old, resultLocation);
+
+        return result;
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN atomicBinaryRMW(ExtAtomicOpType op, Type valueType, ExpressionType pointer, ExpressionType value, ExpressionType& result, uint32_t uoffset)
     {
@@ -3119,6 +4202,7 @@ public:
         return { };
     }
 
+#if USE(JSVALUE64)
     Value WARN_UNUSED_RETURN emitAtomicCompareExchange(ExtAtomicOpType op, Type, Location pointer, Value expected, Value value, uint32_t uoffset)
     {
         ASSERT(pointer.isGPR());
@@ -3231,6 +4315,118 @@ public:
         emitSanitizeAtomicResult(op, expected.type(), resultLocation.asGPR());
         return result;
     }
+#else
+    Value WARN_UNUSED_RETURN emitAtomicCompareExchange(ExtAtomicOpType op, Type valueType, Location pointer, Value expected, Value value, uint32_t uoffset)
+    {
+        ASSERT(pointer.isGPR());
+
+        // For Atomic access, we need SimpleAddress (uoffset = 0).
+        if (uoffset)
+            m_jit.addPtr(TrustedImmPtr(static_cast<int64_t>(uoffset)), pointer.asGPR());
+        Address address = Address(pointer.asGPR());
+
+        if (accessWidth(op) != Width8)
+            throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchTest32(ResultCondition::NonZero, pointer.asGPR(), TrustedImm32(sizeOfAtomicOpMemoryAccess(op) - 1)));
+
+        Value result = topValue(valueType.kind);
+        Location resultLocation;
+        Location a, b, old, cur;
+
+        switch (valueType.kind) {
+        case TypeKind::I64:
+            switch (canonicalWidth(accessWidth(op))) {
+            case Width32: {
+                resultLocation = allocate(result);
+                old = Location::fromGPR(resultLocation.asGPRlo());
+                Location aLocation = emitMaterializeAtomicOperand(expected);
+                ScratchScope<1, 0> scratchA(*this, old);
+                a = Location::fromGPR(scratchA.gpr(0));
+                emitSanitizeAtomicOperand(op, value.type(), aLocation, a);
+                Location bLocation = emitMaterializeAtomicOperand(value);
+                ScratchScope<1, 0> scratchB(*this, old);
+                b = Location::fromGPR(scratchB.gpr(0));
+                emitSanitizeAtomicOperand(op, value.type(), bLocation, b);
+                cur = old;
+                break;
+            }
+            case Width64: {
+                resultLocation = allocate(result);
+                old = resultLocation;
+                Location aLocation = emitMaterializeAtomicOperand(expected);
+                ScratchScope<2, 0> scratchA(*this, old);
+                a = Location::fromGPR2(scratchA.gpr(1), scratchA.gpr(0));
+                emitSanitizeAtomicOperand(op, value.type(), aLocation, a);
+                Location bLocation = emitMaterializeAtomicOperand(value);
+                ScratchScope<2, 0> scratchB(*this, old);
+                b = Location::fromGPR2(scratchB.gpr(1), scratchB.gpr(0));
+                emitSanitizeAtomicOperand(op, value.type(), bLocation, b);
+                cur = old;
+                break;
+            }
+            default:
+                RELEASE_ASSERT_NOT_REACHED();
+            }
+            break;
+        case TypeKind::I32:
+            switch (canonicalWidth(accessWidth(op))) {
+            case Width32: {
+                resultLocation = allocate(result);
+                old = resultLocation;
+                Location aLocation = emitMaterializeAtomicOperand(expected);
+                ScratchScope<1, 0> scratchA(*this, old);
+                a = Location::fromGPR(scratchA.gpr(0));
+                emitSanitizeAtomicOperand(op, value.type(), aLocation, a);
+                Location bLocation = emitMaterializeAtomicOperand(value);
+                ScratchScope<1, 0> scratchB(*this, old);
+                b = Location::fromGPR(scratchB.gpr(0));
+                emitSanitizeAtomicOperand(op, value.type(), bLocation, b);
+                cur = old;
+                break;
+            }
+            case Width64: {
+                ScratchScope<2, 0> scratchResult(*this);
+                old = Location::fromGPR2(scratchResult.gpr(1), scratchResult.gpr(0));
+                resultLocation = Location::fromGPR(scratchResult.gpr(0));
+                ASSERT(resultLocation == allocateWithHint(result, resultLocation));
+                Location aLocation = emitMaterializeAtomicOperand(expected);
+                ScratchScope<2, 0> scratchA(*this);
+                a = Location::fromGPR2(scratchA.gpr(1), scratchA.gpr(0));
+                emitSanitizeAtomicOperand(op, value.type(), aLocation, a);
+                Location bLocation = emitMaterializeAtomicOperand(value);
+                ScratchScope<2, 0> scratchB(*this);
+                b = Location::fromGPR2(scratchB.gpr(1), scratchB.gpr(0));
+                emitSanitizeAtomicOperand(op, value.type(), bLocation, b);
+                cur = old;
+                break;
+            }
+            default:
+                RELEASE_ASSERT_NOT_REACHED();
+            }
+            break;
+        default:
+            RELEASE_ASSERT_NOT_REACHED();
+        }
+
+        JumpList failure;
+
+        emitAtomicOpGeneric(op, address, old, cur, [&](Location old, Location cur) {
+            emitSanitizeAtomicResult(op, valueType.kind, old, resultLocation);
+            if (old.isGPR2()) {
+                failure.append(m_jit.branch32(RelationalCondition::NotEqual, old.asGPRlo(), a.asGPRlo()));
+                failure.append(m_jit.branch32(RelationalCondition::NotEqual, old.asGPRhi(), a.asGPRhi()));
+                m_jit.move(b.asGPRlo(), cur.asGPRlo());
+                m_jit.move(b.asGPRhi(), cur.asGPRhi());
+            } else {
+                failure.append(m_jit.branch32(RelationalCondition::NotEqual, old.asGPR(), a.asGPR()));
+                m_jit.move(b.asGPR(), cur.asGPR());
+            }
+        });
+        emitSanitizeAtomicResult(op, valueType.kind, a, resultLocation);
+        failure.link(&m_jit);
+
+        return result;
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN atomicCompareExchange(ExtAtomicOpType op, Type valueType, ExpressionType pointer, ExpressionType expected, ExpressionType value, ExpressionType& result, uint32_t uoffset)
     {
@@ -3410,6 +4606,8 @@ public:
 
         return FloatingPointRange { min, max, closedLowerEndpoint };
     }
+
+#if USE(JSVALUE64)
 
     void truncInBounds(TruncationKind truncationKind, Location operandLocation, Location resultLocation, FPRReg scratch1FPR, FPRReg scratch2FPR)
     {
@@ -3602,7 +4800,214 @@ public:
         return { };
     }
 
+#else
+
+void truncInBounds(TruncationKind truncationKind, Location operandLocation, Value& result, Location resultLocation)
+    {
+        switch (truncationKind) {
+        case TruncationKind::I32TruncF32S:
+            m_jit.truncateFloatToInt32(operandLocation.asFPR(), resultLocation.asGPR());
+            break;
+        case TruncationKind::I32TruncF64S:
+            m_jit.truncateDoubleToInt32(operandLocation.asFPR(), resultLocation.asGPR());
+            break;
+        case TruncationKind::I32TruncF32U:
+            m_jit.truncateFloatToUint32(operandLocation.asFPR(), resultLocation.asGPR());
+            break;
+        case TruncationKind::I32TruncF64U:
+            m_jit.truncateDoubleToUint32(operandLocation.asFPR(), resultLocation.asGPR());
+            break;
+        case TruncationKind::I64TruncF32S: {
+            auto operand = Value::pinned(TypeKind::F32, operandLocation);
+            consume(result);
+            emitCCall(Math::i64_trunc_s_f32, Vector<Value> { operand }, result);
+            break;
+        }
+        case TruncationKind::I64TruncF64S: {
+            auto operand = Value::pinned(TypeKind::F64, operandLocation);
+            consume(result);
+            emitCCall(Math::i64_trunc_s_f64, Vector<Value> { operand }, result);
+            break;
+        }
+        case TruncationKind::I64TruncF32U: {
+            auto operand = Value::pinned(TypeKind::F32, operandLocation);
+            consume(result);
+            emitCCall(Math::i64_trunc_u_f32, Vector<Value> { operand }, result);
+            break;
+        }
+        case TruncationKind::I64TruncF64U: {
+            auto operand = Value::pinned(TypeKind::F64, operandLocation);
+            consume(result);
+            emitCCall(Math::i64_trunc_u_f64, Vector<Value> { operand }, result);
+            break;
+        }
+        }
+    }
+
+    PartialResult WARN_UNUSED_RETURN truncTrapping(OpType truncationOp, Value operand, Value& result, Type returnType, Type operandType)
+    {
+        ScratchScope<0, 2> scratches(*this);
+
+        Location operandLocation;
+        if (operand.isConst()) {
+            operandLocation = Location::fromFPR(wasmScratchFPR);
+            emitMoveConst(operand, operandLocation);
+        } else
+            operandLocation = loadIfNecessary(operand);
+        ASSERT(operandLocation.isRegister());
+
+        consume(operand); // Allow temp operand location to be reused
+
+        result = topValue(returnType.kind);
+        Location resultLocation = allocate(result);
+        TruncationKind kind = truncationKind(truncationOp);
+        auto range = lookupTruncationRange(kind);
+        auto minFloatConst = range.min;
+        auto maxFloatConst = range.max;
+        Location minFloat = Location::fromFPR(scratches.fpr(0));
+        Location maxFloat = Location::fromFPR(scratches.fpr(1));
+
+        // FIXME: Can we do better isel here? Two floating-point constant materializations for every
+        // trunc seems costly.
+        emitMoveConst(minFloatConst, minFloat);
+        emitMoveConst(maxFloatConst, maxFloat);
+
+        LOG_INSTRUCTION("TruncSaturated", operand, operandLocation, RESULT(result));
+
+        DoubleCondition minCondition = range.closedLowerEndpoint ? DoubleCondition::DoubleLessThanOrUnordered : DoubleCondition::DoubleLessThanOrEqualOrUnordered;
+        Jump belowMin = operandType == Types::F32
+            ? m_jit.branchFloat(minCondition, operandLocation.asFPR(), minFloat.asFPR())
+            : m_jit.branchDouble(minCondition, operandLocation.asFPR(), minFloat.asFPR());
+        throwExceptionIf(ExceptionType::OutOfBoundsTrunc, belowMin);
+
+        Jump aboveMax = operandType == Types::F32
+            ? m_jit.branchFloat(DoubleCondition::DoubleGreaterThanOrEqualOrUnordered, operandLocation.asFPR(), maxFloat.asFPR())
+            : m_jit.branchDouble(DoubleCondition::DoubleGreaterThanOrEqualOrUnordered, operandLocation.asFPR(), maxFloat.asFPR());
+        throwExceptionIf(ExceptionType::OutOfBoundsTrunc, aboveMax);
+
+        truncInBounds(kind, operandLocation, result, resultLocation);
+
+        return { };
+    }
+
+    PartialResult WARN_UNUSED_RETURN truncSaturated(Ext1OpType truncationOp, Value operand, Value& result, Type returnType, Type operandType)
+    {
+        ScratchScope<0, 2> scratches(*this);
+
+        TruncationKind kind = truncationKind(truncationOp);
+        auto range = lookupTruncationRange(kind);
+        auto minFloatConst = range.min;
+        auto maxFloatConst = range.max;
+        Location minFloat = Location::fromFPR(scratches.fpr(0));
+        Location maxFloat = Location::fromFPR(scratches.fpr(1));
+
+        // FIXME: Can we do better isel here? Two floating-point constant materializations for every
+        // trunc seems costly.
+        emitMoveConst(minFloatConst, minFloat);
+        emitMoveConst(maxFloatConst, maxFloat);
+
+        // FIXME: Lots of this is duplicated from AirIRGeneratorBase. Might be nice to unify it?
+        uint64_t minResult = 0;
+        uint64_t maxResult = 0;
+        switch (kind) {
+        case TruncationKind::I32TruncF32S:
+        case TruncationKind::I32TruncF64S:
+            maxResult = bitwise_cast<uint32_t>(INT32_MAX);
+            minResult = bitwise_cast<uint32_t>(INT32_MIN);
+            break;
+        case TruncationKind::I32TruncF32U:
+        case TruncationKind::I32TruncF64U:
+            maxResult = bitwise_cast<uint32_t>(UINT32_MAX);
+            minResult = bitwise_cast<uint32_t>(0U);
+            break;
+        case TruncationKind::I64TruncF32S:
+        case TruncationKind::I64TruncF64S:
+            maxResult = bitwise_cast<uint64_t>(INT64_MAX);
+            minResult = bitwise_cast<uint64_t>(INT64_MIN);
+            break;
+        case TruncationKind::I64TruncF32U:
+        case TruncationKind::I64TruncF64U:
+            maxResult = bitwise_cast<uint64_t>(UINT64_MAX);
+            minResult = bitwise_cast<uint64_t>(0ULL);
+            break;
+        }
+
+        Location operandLocation;
+        if (operand.isConst()) {
+            operandLocation = Location::fromFPR(wasmScratchFPR);
+            emitMoveConst(operand, operandLocation);
+        } else
+            operandLocation = loadIfNecessary(operand);
+        ASSERT(operandLocation.isRegister());
+
+        consume(operand); // Allow temp operand location to be reused
+
+        result = topValue(returnType.kind);
+        Location resultLocation = allocate(result);
+
+        LOG_INSTRUCTION("TruncSaturated", operand, operandLocation, RESULT(result));
+
+        Jump lowerThanMin = operandType == Types::F32
+            ? m_jit.branchFloat(DoubleCondition::DoubleLessThanOrEqualOrUnordered, operandLocation.asFPR(), minFloat.asFPR())
+            : m_jit.branchDouble(DoubleCondition::DoubleLessThanOrEqualOrUnordered, operandLocation.asFPR(), minFloat.asFPR());
+        Jump higherThanMax = operandType == Types::F32
+            ? m_jit.branchFloat(DoubleCondition::DoubleGreaterThanOrEqualOrUnordered, operandLocation.asFPR(), maxFloat.asFPR())
+            : m_jit.branchDouble(DoubleCondition::DoubleGreaterThanOrEqualOrUnordered, operandLocation.asFPR(), maxFloat.asFPR());
+
+        // In-bounds case. Emit normal truncation instructions.
+        truncInBounds(kind, operandLocation, result, resultLocation);
+        resultLocation = locationOf(result);
+
+        Jump afterInBounds = m_jit.jump();
+
+        // Below-minimum case.
+        lowerThanMin.link(&m_jit);
+
+        // As an optimization, if the min result is 0; we can unconditionally return
+        // that if the above-minimum-range check fails; otherwise, we need to check
+        // for NaN since it also will fail the above-minimum-range-check
+        if (!minResult) {
+            if (returnType == Types::I32)
+                m_jit.move(TrustedImm32(0), resultLocation.asGPR());
+            else {
+                m_jit.move(TrustedImm32(0), resultLocation.asGPRlo());
+                m_jit.move(TrustedImm32(0), resultLocation.asGPRhi());
+            }
+        } else {
+            Jump isNotNaN = operandType == Types::F32
+                ? m_jit.branchFloat(DoubleCondition::DoubleEqualAndOrdered, operandLocation.asFPR(), operandLocation.asFPR())
+                : m_jit.branchDouble(DoubleCondition::DoubleEqualAndOrdered, operandLocation.asFPR(), operandLocation.asFPR());
+
+            // NaN case. Set result to zero.
+            if (returnType == Types::I32)
+                m_jit.move(TrustedImm32(0), resultLocation.asGPR());
+            else {
+                m_jit.move(TrustedImm32(0), resultLocation.asGPRlo());
+                m_jit.move(TrustedImm32(0), resultLocation.asGPRhi());
+            }
+            Jump afterNaN = m_jit.jump();
+
+            // Non-NaN case. Set result to the minimum value.
+            isNotNaN.link(&m_jit);
+            emitMoveConst(returnType == Types::I32 ? Value::fromI32(static_cast<int32_t>(minResult)) : Value::fromI64(static_cast<int64_t>(minResult)), resultLocation);
+            afterNaN.link(&m_jit);
+        }
+        Jump afterMin = m_jit.jump();
+
+        // Above maximum case.
+        higherThanMax.link(&m_jit);
+        emitMoveConst(returnType == Types::I32 ? Value::fromI32(static_cast<int32_t>(maxResult)) : Value::fromI64(static_cast<int64_t>(maxResult)), resultLocation);
+
+        afterInBounds.link(&m_jit);
+        afterMin.link(&m_jit);
+
+        return { };
+    }
+
+#endif
+
     // GC
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addRefI31(ExpressionType value, ExpressionType& result)
     {
         if (value.isConst()) {
@@ -3625,7 +5030,29 @@ public:
         m_jit.or64(TrustedImm64(JSValue::NumberTag), resultLocation.asGPR());
         return { };
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addRefI31(ExpressionType value, ExpressionType& result)
+    {
+        if (value.isConst()) {
+            result = Value::fromI64(JSValue::encode(JSValue(JSValue::Int32Tag, value.asI32() & 0x7fffffff)));
+            LOG_INSTRUCTION("RefI31", value, RESULT(result));
+            return { };
+        }
 
+        Location initialValue = loadIfNecessary(value);
+        consume(value);
+
+        result = topValue(TypeKind::I64);
+        Location resultLocation = allocateWithHint(result, initialValue);
+
+        LOG_INSTRUCTION("RefI31", value, RESULT(result));
+        m_jit.and32(TrustedImm32(0x7fffffff), initialValue.asGPR(), resultLocation.asGPRlo());
+        m_jit.move(TrustedImm32(JSValue::Int32Tag), resultLocation.asGPRhi());
+        return { };
+    }
+#endif
+
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI31GetS(ExpressionType value, ExpressionType& result)
     {
         if (value.isConst()) {
@@ -3655,7 +5082,41 @@ public:
 
         return { };
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI31GetS(ExpressionType value, ExpressionType& result)
+    {
+        if (value.isConst()) {
+            if (JSValue::decode(value.asI64()).isNumber())
+                result = Value::fromI32((value.asI64() << 33) >> 33);
+            else {
+                emitThrowException(ExceptionType::NullI31Get);
+                result = Value::fromI32(0);
+            }
 
+            LOG_INSTRUCTION("I31GetS", value, RESULT(result));
+
+            return { };
+        }
+
+
+        Location initialValue = loadIfNecessary(value);
+        consume(value);
+
+        result = topValue(TypeKind::I32);
+        Location resultLocation = allocateWithHint(result, initialValue);
+
+        LOG_INSTRUCTION("I31GetS", value, RESULT(result));
+
+        emitThrowOnNullReference(ExceptionType::NullI31Get, initialValue);
+        m_jit.move(initialValue.asGPRlo(), resultLocation.asGPR());
+
+        m_jit.lshift32(TrustedImm32(1), resultLocation.asGPR());
+        m_jit.rshift32(TrustedImm32(1), resultLocation.asGPR());
+        return { };
+    }
+#endif
+
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI31GetU(ExpressionType value, ExpressionType& result)
     {
         if (value.isConst()) {
@@ -3686,6 +5147,37 @@ public:
 
         return { };
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI31GetU(ExpressionType value, ExpressionType& result)
+    {
+        if (value.isConst()) {
+            if (JSValue::decode(value.asI64()).isNumber())
+                result = Value::fromI32(value.asI64());
+            else {
+                emitThrowException(ExceptionType::NullI31Get);
+                result = Value::fromI32(0);
+            }
+
+            LOG_INSTRUCTION("I31GetU", value, RESULT(result));
+
+            return { };
+        }
+
+
+        Location initialValue = loadIfNecessary(value);
+        consume(value);
+
+        result = topValue(TypeKind::I32);
+        Location resultLocation = allocateWithHint(result, initialValue);
+
+        LOG_INSTRUCTION("I31GetU", value, RESULT(result));
+
+        emitThrowOnNullReference(ExceptionType::NullI31Get, initialValue);
+        m_jit.move(initialValue.asGPRlo(), resultLocation.asGPR());
+
+        return { };
+    }
+#endif
 
     const Ref<TypeDefinition> getTypeDefinition(uint32_t typeIndex) { return m_info.typeSignatures[typeIndex]; }
 
@@ -3706,6 +5198,7 @@ public:
     }
 
     // This will replace the existing value with a new value. Note that if this is an F32 then the top bits may be garbage but that's ok for our current usage.
+#if USE(JSVALUE64)
     Value marshallToI64(Value value)
     {
         ASSERT(!value.isLocal());
@@ -3718,6 +5211,37 @@ public:
         }
         return value;
     }
+#else
+    Value marshallToI64(Value value)
+    {
+        ASSERT(!value.isLocal());
+        if (value.isConst()) {
+            switch (value.type()) {
+            case TypeKind::F64:
+                return Value::fromI64(bitwise_cast<uint64_t>(value.asF64()));
+            case TypeKind::F32:
+            case TypeKind::I32:
+                return Value::fromI64(bitwise_cast<uint32_t>(value.asI32()));
+            default:
+                return value;
+            }
+        }
+        switch (value.type()) {
+        case TypeKind::F64:
+            flushValue(value);
+            return Value::fromTemp(TypeKind::I64, value.asTemp());
+        case TypeKind::F32:
+        case TypeKind::I32: {
+            flushValue(value);
+            Location slot = canonicalSlot(value);
+            m_jit.store32(TrustedImm32(0), slot.asAddress().withOffset(4));
+            return Value::fromTemp(TypeKind::I64, value.asTemp());
+        }
+        default:
+            return value;
+        }
+    }
+#endif
 
 
     PartialResult WARN_UNUSED_RETURN addArrayNew(uint32_t typeIndex, ExpressionType size, ExpressionType initValue, ExpressionType& result)
@@ -3837,6 +5361,7 @@ public:
         return { };
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addArrayGet(ExtGCOpType arrayGetKind, uint32_t typeIndex, ExpressionType arrayref, ExpressionType index, ExpressionType& result)
     {
         StorageType elementType = getArrayElementType(typeIndex);
@@ -3907,7 +5432,85 @@ public:
         }
         return { };
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addArrayGet(ExtGCOpType arrayGetKind, uint32_t typeIndex, ExpressionType arrayref, ExpressionType index, ExpressionType& result)
+    {
+        StorageType elementType = getArrayElementType(typeIndex);
+        Type resultType = elementType.unpacked();
 
+        if (arrayref.isConst()) {
+            ASSERT(arrayref.asI64() == JSValue::encode(jsNull()));
+            emitThrowException(ExceptionType::NullArrayGet);
+            result = Value::fromRef(resultType.kind, 0);
+            return { };
+        }
+
+        Location arrayLocation = loadIfNecessary(arrayref);
+        emitThrowOnNullReference(ExceptionType::NullArrayGet, arrayLocation);
+
+        if (index.isConst()) {
+            m_jit.load32(MacroAssembler::Address(arrayLocation.asGPRlo(), JSWebAssemblyArray::offsetOfSize()), wasmScratchGPR);
+            throwExceptionIf(ExceptionType::OutOfBoundsArrayGet,
+                m_jit.branch32(MacroAssembler::BelowOrEqual, wasmScratchGPR, TrustedImm32(index.asI32())));
+        } else {
+            Location indexLocation = loadIfNecessary(index);
+            throwExceptionIf(ExceptionType::OutOfBoundsArrayGet,
+                m_jit.branch32(MacroAssembler::AboveOrEqual, indexLocation.asGPR(), MacroAssembler::Address(arrayLocation.asGPRlo(), JSWebAssemblyArray::offsetOfSize())));
+        }
+
+        Vector<Value, 8> arguments = {
+            instanceValue(),
+            Value::fromI32(typeIndex),
+            arrayref,
+            index,
+        };
+
+        Value getResult = topValue(TypeKind::I64);
+        emitCCall(operationWasmArrayGet, arguments, getResult);
+        Location getResultLocation = loadIfNecessary(getResult);
+
+        if (isFloatingPointType(resultType.kind)) {
+            consume(getResult);
+            result = topValue(resultType.kind);
+            Location resultLocation = allocate(result);
+            m_jit.move64ToDouble(getResultLocation.asGPRhi(), getResultLocation.asGPRlo(), resultLocation.asFPR());
+        } else if (resultType.kind == TypeKind::I32) {
+            consume(getResult);
+            result = topValue(resultType.kind);
+            Location resultLocation = allocate(result);
+            m_jit.move(getResultLocation.asGPRlo(), resultLocation.asGPR());
+        } else
+            result = getResult;
+
+        switch (arrayGetKind) {
+        case ExtGCOpType::ArrayGet:
+            LOG_INSTRUCTION("ArrayGet", typeIndex, arrayref, index, RESULT(result));
+            break;
+        case ExtGCOpType::ArrayGetU:
+            ASSERT(resultType.kind == TypeKind::I32);
+
+            LOG_INSTRUCTION("ArrayGetU", typeIndex, arrayref, index, RESULT(result));
+            break;
+        case ExtGCOpType::ArrayGetS: {
+            ASSERT(resultType.kind == TypeKind::I32);
+            size_t elementSize = elementType.as<PackedType>() == PackedType::I8 ? sizeof(uint8_t) : sizeof(uint16_t);
+            uint8_t bitShift = (sizeof(uint32_t) - elementSize) * 8;
+            Location resultLocation = allocate(result);
+
+            m_jit.lshift32(TrustedImm32(bitShift), resultLocation.asGPR());
+            m_jit.rshift32(TrustedImm32(bitShift), resultLocation.asGPR());
+            LOG_INSTRUCTION("ArrayGetS", typeIndex, arrayref, index, RESULT(result));
+            break;
+        }
+        default:
+            RELEASE_ASSERT_NOT_REACHED();
+            return { };
+        }
+        return { };
+    }
+#endif
+
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addArraySet(uint32_t typeIndex, ExpressionType arrayref, ExpressionType index, ExpressionType value)
     {
         if (arrayref.isConst()) {
@@ -3934,7 +5537,36 @@ public:
         LOG_INSTRUCTION("ArraySet", typeIndex, arrayref, index, value);
         return { };
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addArraySet(uint32_t typeIndex, ExpressionType arrayref, ExpressionType index, ExpressionType value)
+    {
+        if (arrayref.isConst()) {
+            ASSERT(arrayref.asI64() == JSValue::encode(jsNull()));
+            emitThrowException(ExceptionType::NullArraySet);
+            return { };
+        }
 
+        Location arrayLocation = loadIfNecessary(arrayref);
+        emitThrowOnNullReference(ExceptionType::NullArraySet, arrayLocation);
+
+        if (index.isConst()) {
+            m_jit.load32(MacroAssembler::Address(arrayLocation.asGPRlo(), JSWebAssemblyArray::offsetOfSize()), wasmScratchGPR);
+            throwExceptionIf(ExceptionType::OutOfBoundsArraySet,
+                m_jit.branch32(MacroAssembler::BelowOrEqual, wasmScratchGPR, TrustedImm32(index.asI32())));
+        } else {
+            Location indexLocation = loadIfNecessary(index);
+            throwExceptionIf(ExceptionType::OutOfBoundsArraySet,
+                m_jit.branch32(MacroAssembler::AboveOrEqual, indexLocation.asGPR(), MacroAssembler::Address(arrayLocation.asGPRlo(), JSWebAssemblyArray::offsetOfSize())));
+        }
+
+        emitArraySetUnchecked(typeIndex, arrayref, index, value);
+
+        LOG_INSTRUCTION("ArraySet", typeIndex, arrayref, index, value);
+        return { };
+    }
+#endif
+
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addArrayLen(ExpressionType arrayref, ExpressionType& result)
     {
         if (arrayref.isConst()) {
@@ -3956,7 +5588,31 @@ public:
         LOG_INSTRUCTION("ArrayLen", arrayref, RESULT(result));
         return { };
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addArrayLen(ExpressionType arrayref, ExpressionType& result)
+    {
+        if (arrayref.isConst()) {
+            ASSERT(arrayref.asI64() == JSValue::encode(jsNull()));
+            emitThrowException(ExceptionType::NullArrayLen);
+            result = Value::fromI32(0);
+            LOG_INSTRUCTION("ArrayLen", arrayref, RESULT(result), "Exception");
+            return { };
+        }
 
+        Location arrayLocation = loadIfNecessary(arrayref);
+        consume(arrayref);
+        emitThrowOnNullReference(ExceptionType::NullArrayLen, arrayLocation);
+
+        result = topValue(TypeKind::I32);
+        Location resultLocation = allocateWithHint(result, arrayLocation);
+        m_jit.load32(MacroAssembler::Address(arrayLocation.asGPRlo(), JSWebAssemblyArray::offsetOfSize()), resultLocation.asGPR());
+
+        LOG_INSTRUCTION("ArrayLen", arrayref, RESULT(result));
+        return { };
+    }
+#endif
+
+#if USE(JSVALUE64)
     void emitStructSet(GPRReg structGPR, const StructType& structType, uint32_t fieldIndex, Value value)
     {
         m_jit.loadPtr(MacroAssembler::Address(structGPR, JSWebAssemblyStruct::offsetOfPayload()), wasmScratchGPR);
@@ -4028,7 +5684,81 @@ public:
         }
         consume(value);
     }
+#else
+    void emitStructSet(GPRReg structGPR, const StructType& structType, uint32_t fieldIndex, Value value)
+    {
+        m_jit.loadPtr(MacroAssembler::Address(structGPR, JSWebAssemblyStruct::offsetOfPayload()), wasmScratchGPR);
+        unsigned fieldOffset = *structType.offsetOfField(fieldIndex);
+        RELEASE_ASSERT((std::numeric_limits<int32_t>::max() & fieldOffset) == fieldOffset);
 
+        TypeKind kind = toValueKind(structType.field(fieldIndex).type.unpacked().kind);
+        if (value.isConst()) {
+            switch (kind) {
+            case TypeKind::I32:
+                if (structType.field(fieldIndex).type.is<PackedType>()) {
+                    ScratchScope<1, 0> scratches(*this);
+                    // If it's a packed type, we materialize the constant to ensure constant blinding.
+                    emitMoveConst(value, Location::fromGPR(scratches.gpr(0)));
+                    switch (structType.field(fieldIndex).type.as<PackedType>()) {
+                    case PackedType::I8:
+                        m_jit.store8(scratches.gpr(0), MacroAssembler::Address(wasmScratchGPR, fieldOffset));
+                        break;
+                    case PackedType::I16:
+                        m_jit.store16(scratches.gpr(0), MacroAssembler::Address(wasmScratchGPR, fieldOffset));
+                        break;
+                    }
+                    break;
+                }
+                m_jit.store32(MacroAssembler::Imm32(value.asI32()), MacroAssembler::Address(wasmScratchGPR, fieldOffset));
+                break;
+            case TypeKind::F32:
+                m_jit.store32(MacroAssembler::Imm32(value.asI32()), MacroAssembler::Address(wasmScratchGPR, fieldOffset));
+                break;
+            case TypeKind::I64:
+            case TypeKind::F64:
+                m_jit.storePair32(TrustedImm32(value.asI64lo()), TrustedImm32(value.asI64hi()), MacroAssembler::Address(wasmScratchGPR, fieldOffset));
+                break;
+            default:
+                RELEASE_ASSERT_NOT_REACHED();
+                break;
+            }
+            return;
+        }
+
+        Location valueLocation = loadIfNecessary(value);
+        switch (kind) {
+        case TypeKind::I32:
+            if (structType.field(fieldIndex).type.is<PackedType>()) {
+                switch (structType.field(fieldIndex).type.as<PackedType>()) {
+                case PackedType::I8:
+                    m_jit.store8(valueLocation.asGPR(), MacroAssembler::Address(wasmScratchGPR, fieldOffset));
+                    break;
+                case PackedType::I16:
+                    m_jit.store16(valueLocation.asGPR(), MacroAssembler::Address(wasmScratchGPR, fieldOffset));
+                    break;
+                }
+                break;
+            }
+            m_jit.store32(valueLocation.asGPR(), MacroAssembler::Address(wasmScratchGPR, fieldOffset));
+            break;
+        case TypeKind::I64:
+            m_jit.storePair32(valueLocation.asGPRlo(), valueLocation.asGPRhi(), MacroAssembler::Address(wasmScratchGPR, fieldOffset));
+            break;
+        case TypeKind::F32:
+            m_jit.storeFloat(valueLocation.asFPR(), MacroAssembler::Address(wasmScratchGPR, fieldOffset));
+            break;
+        case TypeKind::F64:
+            m_jit.storeDouble(valueLocation.asFPR(), MacroAssembler::Address(wasmScratchGPR, fieldOffset));
+            break;
+        default:
+            RELEASE_ASSERT_NOT_REACHED();
+            break;
+        }
+        consume(value);
+    }
+#endif
+
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addStructNewDefault(uint32_t typeIndex, ExpressionType& result)
     {
 
@@ -4054,7 +5784,35 @@ public:
 
         return { };
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addStructNewDefault(uint32_t typeIndex, ExpressionType& result)
+    {
 
+        Vector<Value, 8> arguments = {
+            instanceValue(),
+            Value::fromI32(typeIndex),
+        };
+        result = topValue(TypeKind::I64);
+        emitCCall(operationWasmStructNewEmpty, arguments, result);
+
+        // FIXME: What about OOM?
+
+        const auto& structType = *m_info.typeSignatures[typeIndex]->expand().template as<StructType>();
+        Location structLocation = allocate(result);
+        for (StructFieldCount i = 0; i < structType.fieldCount(); ++i) {
+            if (Wasm::isRefType(structType.field(i).type))
+                emitStructSet(structLocation.asGPRlo(), structType, i, Value::fromRef(TypeKind::RefNull, JSValue::encode(jsNull())));
+            else
+                emitStructSet(structLocation.asGPRlo(), structType, i, Value::fromI64(0));
+        }
+
+        LOG_INSTRUCTION("StructNewDefault", typeIndex, RESULT(result));
+
+        return { };
+    }
+#endif
+
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addStructNew(uint32_t typeIndex, Vector<Value>& args, Value& result)
     {
         Vector<Value, 8> arguments = {
@@ -4081,7 +5839,36 @@ public:
 
         return { };
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addStructNew(uint32_t typeIndex, Vector<Value>& args, Value& result)
+    {
+        Vector<Value, 8> arguments = {
+            instanceValue(),
+            Value::fromI32(typeIndex),
+        };
+        // Note: using topValue here would be wrong because args[0] would be clobbered by the result.
+        Value allocationResult = Value::fromTemp(TypeKind::Structref, currentControlData().enclosedHeight() + currentControlData().implicitSlots() + m_parser->expressionStack().size() + args.size());
+        emitCCall(operationWasmStructNewEmpty, arguments, allocationResult);
 
+        const auto& structType = *m_info.typeSignatures[typeIndex]->expand().template as<StructType>();
+        Location allocationLocation = allocate(allocationResult);
+        for (uint32_t i = 0; i < args.size(); ++i)
+            emitStructSet(allocationLocation.asGPRlo(), structType, i, args[i]);
+
+        result = topValue(TypeKind::Structref);
+        Location resultLocation = allocate(result);
+        emitMove(allocationResult, resultLocation);
+        // If args.isEmpty() then allocationResult.asTemp() == result.asTemp() so we will consume our result.
+        if (args.size())
+            consume(allocationResult);
+
+        LOG_INSTRUCTION("StructNew", typeIndex, args, RESULT(result));
+
+        return { };
+    }
+#endif
+
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addStructGet(ExtGCOpType structGetKind, Value structValue, const StructType& structType, uint32_t fieldIndex, Value& result)
     {
         TypeKind resultKind = structType.field(fieldIndex).type.unpacked().kind;
@@ -4152,7 +5939,80 @@ public:
         LOG_INSTRUCTION("StructGet", structValue, fieldIndex, RESULT(result));
         return { };
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addStructGet(ExtGCOpType structGetKind, Value structValue, const StructType& structType, uint32_t fieldIndex, Value& result)
+    {
+        TypeKind resultKind = structType.field(fieldIndex).type.unpacked().kind;
+        if (structValue.isConst()) {
+            // This is the only constant struct currently possible.
+            ASSERT(JSValue::decode(structValue.asRef()).isNull());
+            emitThrowException(ExceptionType::NullStructGet);
+            result = Value::fromRef(resultKind, 0);
+            LOG_INSTRUCTION("StructGet", structValue, fieldIndex, "Exception");
+            return { };
+        }
 
+        Location structLocation = allocate(structValue);
+        emitThrowOnNullReference(ExceptionType::NullStructGet, structLocation);
+
+        m_jit.loadPtr(MacroAssembler::Address(structLocation.asGPRlo(), JSWebAssemblyStruct::offsetOfPayload()), wasmScratchGPR);
+        unsigned fieldOffset = *structType.offsetOfField(fieldIndex);
+        RELEASE_ASSERT((std::numeric_limits<int32_t>::max() & fieldOffset) == fieldOffset);
+
+        consume(structValue);
+        result = topValue(resultKind);
+        Location resultLocation = allocate(result);
+
+        switch (result.type()) {
+        case TypeKind::I32:
+            if (structType.field(fieldIndex).type.is<PackedType>()) {
+                switch (structType.field(fieldIndex).type.as<PackedType>()) {
+                case PackedType::I8:
+                    m_jit.load8(MacroAssembler::Address(wasmScratchGPR, fieldOffset), resultLocation.asGPR());
+                    break;
+                case PackedType::I16:
+                    m_jit.load16(MacroAssembler::Address(wasmScratchGPR, fieldOffset), resultLocation.asGPR());
+                    break;
+                }
+                switch (structGetKind) {
+                case ExtGCOpType::StructGetU:
+                    LOG_INSTRUCTION("StructGetU", structValue, fieldIndex, RESULT(result));
+                    return { };
+                case ExtGCOpType::StructGetS: {
+                    size_t elementSize = structType.field(fieldIndex).type.as<PackedType>() == PackedType::I8 ? sizeof(uint8_t) : sizeof(uint16_t);
+                    uint8_t bitShift = (sizeof(uint32_t) - elementSize) * 8;
+                    m_jit.lshift32(TrustedImm32(bitShift), resultLocation.asGPR());
+                    m_jit.rshift32(TrustedImm32(bitShift), resultLocation.asGPR());
+                    LOG_INSTRUCTION("StructGetS", structValue, fieldIndex, RESULT(result));
+                    return { };
+                }
+                default:
+                    RELEASE_ASSERT_NOT_REACHED();
+                    return { };
+                }
+            }
+            m_jit.load32(MacroAssembler::Address(wasmScratchGPR, fieldOffset), resultLocation.asGPR());
+            break;
+        case TypeKind::I64:
+            m_jit.loadPair32(MacroAssembler::Address(wasmScratchGPR, fieldOffset), resultLocation.asGPRlo(), resultLocation.asGPRhi());
+            break;
+        case TypeKind::F32:
+            m_jit.loadFloat(MacroAssembler::Address(wasmScratchGPR, fieldOffset), resultLocation.asFPR());
+            break;
+        case TypeKind::F64:
+            m_jit.loadDouble(MacroAssembler::Address(wasmScratchGPR, fieldOffset), resultLocation.asFPR());
+            break;
+        default:
+            RELEASE_ASSERT_NOT_REACHED();
+            break;
+        }
+
+        LOG_INSTRUCTION("StructGet", structValue, fieldIndex, RESULT(result));
+        return { };
+    }
+#endif
+
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addStructSet(Value structValue, const StructType& structType, uint32_t fieldIndex, Value value)
     {
         if (structValue.isConst()) {
@@ -4170,6 +6030,25 @@ public:
         LOG_INSTRUCTION("StructSet", structValue, fieldIndex, value);
         return { };
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addStructSet(Value structValue, const StructType& structType, uint32_t fieldIndex, Value value)
+    {
+        if (structValue.isConst()) {
+            // This is the only constant struct currently possible.
+            ASSERT(JSValue::decode(structValue.asRef()).isNull());
+            emitThrowException(ExceptionType::NullStructSet);
+            LOG_INSTRUCTION("StructSet", structValue, fieldIndex, value, "Exception");
+            return { };
+        }
+
+        Location structLocation = allocate(structValue);
+        emitThrowOnNullReference(ExceptionType::NullStructSet, structLocation);
+
+        emitStructSet(structLocation.asGPRlo(), structType, fieldIndex, value);
+        LOG_INSTRUCTION("StructSet", structValue, fieldIndex, value);
+        return { };
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addRefTest(ExpressionType reference, bool allowNull, int32_t heapType, ExpressionType& result)
     {
@@ -4187,6 +6066,7 @@ public:
         return { };
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addRefCast(ExpressionType reference, bool allowNull, int32_t heapType, ExpressionType& result)
     {
         Vector<Value, 8> arguments = {
@@ -4204,6 +6084,26 @@ public:
 
         return { };
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addRefCast(ExpressionType reference, bool allowNull, int32_t heapType, ExpressionType& result)
+    {
+        Vector<Value, 8> arguments = {
+            instanceValue(),
+            reference,
+            Value::fromI32(allowNull),
+            Value::fromI32(heapType),
+        };
+        result = topValue(TypeKind::Ref);
+        emitCCall(operationWasmRefCast, arguments, result);
+        Location resultLocation = allocate(result);
+        throwExceptionIf(ExceptionType::CastFailure,
+            m_jit.branch32(MacroAssembler::Equal, resultLocation.asGPRhi(), TrustedImm32(JSValue::EmptyValueTag)));
+
+        LOG_INSTRUCTION("RefCast", reference, allowNull, heapType, RESULT(result));
+
+        return { };
+    }
+#endif
 
 
     PartialResult WARN_UNUSED_RETURN addAnyConvertExtern(ExpressionType reference, ExpressionType& result)
@@ -4436,6 +6336,7 @@ public:
         );
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64Add(Value lhs, Value rhs, Value& result)
     {
         EMIT_BINARY(
@@ -4450,6 +6351,23 @@ public:
             )
         );
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI64Add(Value lhs, Value rhs, Value& result)
+    {
+        EMIT_BINARY(
+            "I64Add", TypeKind::I64,
+            BLOCK(Value::fromI64(lhs.asI64() + rhs.asI64())),
+            BLOCK(
+                m_jit.add64(lhsLocation.asGPRhi(), lhsLocation.asGPRlo(), rhsLocation.asGPRhi(), rhsLocation.asGPRlo(), resultLocation.asGPRhi(), resultLocation.asGPRlo());
+            ),
+            BLOCK(
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2));
+                m_jit.add64(lhsLocation.asGPRhi(), lhsLocation.asGPRlo(), rhsLocation.asGPRhi(), rhsLocation.asGPRlo(), resultLocation.asGPRhi(), resultLocation.asGPRlo());
+            )
+        );
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addF32Add(Value lhs, Value rhs, Value& result)
     {
@@ -4504,6 +6422,7 @@ public:
         );
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64Sub(Value lhs, Value rhs, Value& result)
     {
         EMIT_BINARY(
@@ -4524,6 +6443,31 @@ public:
             )
         );
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI64Sub(Value lhs, Value rhs, Value& result)
+    {
+        EMIT_BINARY(
+            "I64Sub", TypeKind::I64,
+            BLOCK(Value::fromI64(lhs.asI64() - rhs.asI64())),
+            BLOCK(
+                m_jit.sub64(
+                    lhsLocation.asGPRhi(), lhsLocation.asGPRlo(),
+                    rhsLocation.asGPRhi(), rhsLocation.asGPRlo(),
+                    resultLocation.asGPRhi(), resultLocation.asGPRlo()
+                );
+            ),
+            BLOCK(
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2));
+                m_jit.sub64(
+                    lhsLocation.asGPRhi(), lhsLocation.asGPRlo(),
+                    rhsLocation.asGPRhi(), rhsLocation.asGPRlo(),
+                    resultLocation.asGPRhi(), resultLocation.asGPRlo()
+                );
+            )
+        );
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addF32Sub(Value lhs, Value rhs, Value& result)
     {
@@ -4585,6 +6529,7 @@ public:
         );
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64Mul(Value lhs, Value rhs, Value& result)
     {
         EMIT_BINARY(
@@ -4600,6 +6545,37 @@ public:
             )
         );
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI64Mul(Value lhs, Value rhs, Value& result)
+    {
+        EMIT_BINARY(
+            "I64Mul", TypeKind::I64,
+            BLOCK(Value::fromI64(lhs.asI64() * rhs.asI64())),
+            BLOCK(
+                ScratchScope<2, 0> scratches(*this, lhsLocation, rhsLocation, resultLocation);
+                Location tmpHiLo = Location::fromGPR(scratches.gpr(0));
+                Location tmpLoHi = Location::fromGPR(scratches.gpr(1));
+                m_jit.mul32(lhsLocation.asGPRhi(), rhsLocation.asGPRlo(), tmpHiLo.asGPR());
+                m_jit.mul32(lhsLocation.asGPRlo(), rhsLocation.asGPRhi(), tmpLoHi.asGPR());
+                m_jit.uMull32(lhsLocation.asGPRlo(), rhsLocation.asGPRlo(), resultLocation.asGPRhi(),  resultLocation.asGPRlo());
+                m_jit.add32(tmpHiLo.asGPR(), resultLocation.asGPRhi());
+                m_jit.add32(tmpLoHi.asGPR(), resultLocation.asGPRhi());
+            ),
+            BLOCK(
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR,  wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2));
+                ScratchScope<2, 0> scratches(*this, lhsLocation, rhsLocation, resultLocation);
+                Location tmpHiLo = Location::fromGPR(scratches.gpr(0));
+                Location tmpLoHi = Location::fromGPR(scratches.gpr(1));
+                m_jit.mul32(lhsLocation.asGPRhi(), rhsLocation.asGPRlo(), tmpHiLo.asGPR());
+                m_jit.mul32(lhsLocation.asGPRlo(), rhsLocation.asGPRhi(), tmpLoHi.asGPR());
+                m_jit.uMull32(lhsLocation.asGPRlo(), rhsLocation.asGPRlo(), resultLocation.asGPRhi(),  resultLocation.asGPRlo());
+                m_jit.add32(tmpHiLo.asGPR(), resultLocation.asGPRhi());
+                m_jit.add32(tmpLoHi.asGPR(), resultLocation.asGPRhi());
+            )
+        );
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addF32Mul(Value lhs, Value rhs, Value& result)
     {
@@ -4654,11 +6630,19 @@ public:
         m_exceptions[static_cast<unsigned>(type)].append(jump);
     }
 
+#if USE(JSVALUE64)
     void emitThrowOnNullReference(ExceptionType type, Location ref)
     {
         throwExceptionIf(type, m_jit.branch64(MacroAssembler::Equal, ref.asGPR(), TrustedImm64(JSValue::encode(jsNull()))));
     }
+#else
+    void emitThrowOnNullReference(ExceptionType type, Location ref)
+    {
+        throwExceptionIf(type, m_jit.branch32(MacroAssembler::Equal, ref.asGPRhi(), TrustedImm32(JSValue::NullTag)));
+    }
+#endif
 
+#if USE(JSVALUE64)
 #if CPU(X86_64)
     RegisterSet clobbersForDivX86()
     {
@@ -4683,7 +6667,7 @@ public:
     ScratchScope<0, 0> scratches(*this, clobbersForDivX86())
 
     template<typename IntType, bool IsMod>
-    void emitModOrDiv(const Value& lhs, Location lhsLocation, const Value& rhs, Location rhsLocation, Location resultLocation)
+    void emitModOrDiv(const Value& lhs, Location lhsLocation, const Value& rhs, Location rhsLocation, const Value&, Location resultLocation)
     {
         // FIXME: We currently don't do nearly as sophisticated instruction selection on Intel as we do on other platforms,
         // but there's no good reason we can't. We should probably port over the isel in the future if it seems to yield
@@ -4768,7 +6752,7 @@ public:
 #define PREPARE_FOR_MOD_OR_DIV
 
     template<typename IntType, bool IsMod>
-    void emitModOrDiv(const Value& lhs, Location lhsLocation, const Value& rhs, Location rhsLocation, Location resultLocation)
+    void emitModOrDiv(const Value& lhs, Location lhsLocation, const Value& rhs, Location rhsLocation, const Value&, Location resultLocation)
     {
         constexpr bool isSigned = std::is_signed<IntType>();
         constexpr bool is32 = sizeof(IntType) == 4;
@@ -4964,6 +6948,120 @@ public:
         }
     }
 #endif
+#else // USE(JSVALUE32_64)
+#define PREPARE_FOR_MOD_OR_DIV
+
+    template<typename IntType, bool IsMod>
+    void emitModOrDiv(Value& lhs, Location lhsLocation, Value& rhs, Location rhsLocation, Value& result, Location)
+    {
+        static_assert(sizeof(IntType) == 4 || sizeof(IntType) == 8);
+
+        constexpr bool isSigned = std::is_signed<IntType>();
+        constexpr bool is32 = sizeof(IntType) == 4;
+
+        TypeKind argType, returnType;
+        if constexpr (is32)
+            argType = returnType = TypeKind::I32;
+        else
+            argType = returnType = TypeKind::I64;
+
+        IntType (*modOrDiv)(IntType, IntType);
+        if constexpr (IsMod) {
+            if constexpr (is32) {
+                if constexpr (isSigned)
+                    modOrDiv = Math::i32_rem_s;
+                else
+                    modOrDiv = Math::i32_rem_u;
+            } else {
+                if constexpr (isSigned)
+                    modOrDiv = Math::i64_rem_s;
+                else
+                    modOrDiv = Math::i64_rem_u;
+            }
+        } else {
+            if constexpr (is32) {
+                if constexpr (isSigned)
+                    modOrDiv = Math::i32_div_s;
+                else
+                    modOrDiv = Math::i32_div_u;
+            } else {
+                if constexpr (isSigned)
+                    modOrDiv = Math::i64_div_s;
+                else
+                    modOrDiv = Math::i64_div_u;
+            }
+        }
+
+        if (lhs.isConst() || rhs.isConst()) {
+            auto& constantLocation = ImmHelpers::immLocation(lhsLocation, rhsLocation);
+            if constexpr (is32)
+                constantLocation = Location::fromGPR(wasmScratchGPR);
+            else
+                constantLocation = Location::fromGPR2(wasmScratchGPR2, wasmScratchGPR);
+            emitMoveConst(ImmHelpers::imm(lhs, rhs), constantLocation);
+        }
+
+        bool needsZeroCheck = [&] {
+            if constexpr (is32)
+                return !(rhs.isConst() && rhs.asI32());
+            else
+                return !(rhs.isConst() && rhs.asI64());
+        }();
+
+        if (needsZeroCheck) {
+            if constexpr (is32)
+                throwExceptionIf(ExceptionType::DivisionByZero, m_jit.branchTest32(ResultCondition::Zero, rhsLocation.asGPR()));
+            else {
+                auto loNotZero = m_jit.branchTest32(ResultCondition::NonZero, rhsLocation.asGPRlo());
+                throwExceptionIf(ExceptionType::DivisionByZero, m_jit.branchTest32(ResultCondition::Zero, rhsLocation.asGPRhi()));
+                loNotZero.link(&m_jit);
+            }
+        }
+
+        if constexpr (!IsMod) {            
+            if constexpr (isSigned) {
+                bool needsOverflowCheck = [&] {
+                    if constexpr (is32) {
+                        if (rhs.isConst() && rhs.asI32() != -1)
+                            return false;
+                        if (lhs.isConst() && lhs.asI32() != std::numeric_limits<int32_t>::min())
+                            return false;
+                    } else {
+                        if (rhs.isConst() && rhs.asI64() != -1)
+                            return false;
+                        if (lhs.isConst() && lhs.asI64() != std::numeric_limits<int64_t>::min())
+                            return false;
+                    }
+
+                    return true;
+                }();
+
+                if (needsOverflowCheck) {
+                    if constexpr (is32) {
+                        auto rhsIsOk = m_jit.branch32(RelationalCondition::NotEqual, rhsLocation.asGPR(), TrustedImm32(-1));
+                        throwExceptionIf(ExceptionType::IntegerOverflow, m_jit.branch32(RelationalCondition::Equal, lhsLocation.asGPR(), TrustedImm32(std::numeric_limits<int32_t>::min())));
+                        rhsIsOk.link(&m_jit);
+                    } else {
+                        auto rhsLoIsOk = m_jit.branch32(RelationalCondition::NotEqual, rhsLocation.asGPRlo(), TrustedImm32(-1));
+                        auto rhsHiIsOk = m_jit.branch32(RelationalCondition::NotEqual, rhsLocation.asGPRhi(), TrustedImm32(-1));
+
+                        auto lhsLoIsOk = m_jit.branchTest32(ResultCondition::NonZero, lhsLocation.asGPRlo());
+                        throwExceptionIf(ExceptionType::IntegerOverflow, m_jit.branch32(RelationalCondition::Equal, lhsLocation.asGPRhi(), TrustedImm32(std::numeric_limits<int32_t>::min())));
+
+                        rhsLoIsOk.link(&m_jit);
+                        rhsHiIsOk.link(&m_jit);
+                        lhsLoIsOk.link(&m_jit);
+                    }
+                }
+            }
+        }
+
+        auto lhsArg = Value::pinned(argType, lhsLocation);
+        auto rhsArg = Value::pinned(argType, rhsLocation);
+        consume(result);
+        emitCCall(modOrDiv, Vector<Value> { lhsArg, rhsArg }, result);
+    }
+#endif
 
     template<typename IntType>
     Value checkConstantDivision(const Value& lhs, const Value& rhs)
@@ -4991,10 +7089,10 @@ public:
                 Value::fromI32(lhs.asI32() / checkConstantDivision<int32_t>(lhs, rhs).asI32())
             ),
             BLOCK(
-                emitModOrDiv<int32_t, false>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<int32_t, false>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             ),
             BLOCK(
-                emitModOrDiv<int32_t, false>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<int32_t, false>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             )
         );
     }
@@ -5008,10 +7106,10 @@ public:
                 Value::fromI64(lhs.asI64() / checkConstantDivision<int64_t>(lhs, rhs).asI64())
             ),
             BLOCK(
-                emitModOrDiv<int64_t, false>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<int64_t, false>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             ),
             BLOCK(
-                emitModOrDiv<int64_t, false>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<int64_t, false>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             )
         );
     }
@@ -5025,10 +7123,10 @@ public:
                 Value::fromI32(static_cast<uint32_t>(lhs.asI32()) / static_cast<uint32_t>(checkConstantDivision<int32_t>(lhs, rhs).asI32()))
             ),
             BLOCK(
-                emitModOrDiv<uint32_t, false>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<uint32_t, false>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             ),
             BLOCK(
-                emitModOrDiv<uint32_t, false>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<uint32_t, false>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             )
         );
     }
@@ -5042,10 +7140,10 @@ public:
                 Value::fromI64(static_cast<uint64_t>(lhs.asI64()) / static_cast<uint64_t>(checkConstantDivision<int64_t>(lhs, rhs).asI64()))
             ),
             BLOCK(
-                emitModOrDiv<uint64_t, false>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<uint64_t, false>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             ),
             BLOCK(
-                emitModOrDiv<uint64_t, false>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<uint64_t, false>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             )
         );
     }
@@ -5059,10 +7157,10 @@ public:
                 Value::fromI32(lhs.asI32() % checkConstantDivision<int32_t>(lhs, rhs).asI32())
             ),
             BLOCK(
-                emitModOrDiv<int32_t, true>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<int32_t, true>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             ),
             BLOCK(
-                emitModOrDiv<int32_t, true>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<int32_t, true>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             )
         );
     }
@@ -5076,10 +7174,10 @@ public:
                 Value::fromI64(lhs.asI64() % checkConstantDivision<int64_t>(lhs, rhs).asI64())
             ),
             BLOCK(
-                emitModOrDiv<int64_t, true>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<int64_t, true>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             ),
             BLOCK(
-                emitModOrDiv<int64_t, true>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<int64_t, true>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             )
         );
     }
@@ -5093,10 +7191,10 @@ public:
                 Value::fromI32(static_cast<uint32_t>(lhs.asI32()) % static_cast<uint32_t>(checkConstantDivision<int32_t>(lhs, rhs).asI32()))
             ),
             BLOCK(
-                emitModOrDiv<uint32_t, true>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<uint32_t, true>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             ),
             BLOCK(
-                emitModOrDiv<uint32_t, true>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<uint32_t, true>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             )
         );
     }
@@ -5110,10 +7208,10 @@ public:
                 Value::fromI64(static_cast<uint64_t>(lhs.asI64()) % static_cast<uint64_t>(checkConstantDivision<int64_t>(lhs, rhs).asI64()))
             ),
             BLOCK(
-                emitModOrDiv<uint64_t, true>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<uint64_t, true>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             ),
             BLOCK(
-                emitModOrDiv<uint64_t, true>(lhs, lhsLocation, rhs, rhsLocation, resultLocation);
+                emitModOrDiv<uint64_t, true>(lhs, lhsLocation, rhs, rhsLocation, result, resultLocation);
             )
         );
     }
@@ -5319,6 +7417,7 @@ public:
         );
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64And(Value lhs, Value rhs, Value& result)
     {
         EMIT_BINARY(
@@ -5333,6 +7432,25 @@ public:
             )
         );
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI64And(Value lhs, Value rhs, Value& result)
+    {
+        EMIT_BINARY(
+            "I64And", TypeKind::I64,
+            BLOCK(Value::fromI64(lhs.asI64() & rhs.asI64())),
+            BLOCK(
+                m_jit.and32(lhsLocation.asGPRhi(), rhsLocation.asGPRhi(), resultLocation.asGPRhi());
+                m_jit.and32(lhsLocation.asGPRlo(), rhsLocation.asGPRlo(), resultLocation.asGPRlo());
+            ),
+            BLOCK(
+                m_jit.move(ImmHelpers::regLocation(lhsLocation, rhsLocation).asGPRhi(), resultLocation.asGPRhi());
+                m_jit.move(ImmHelpers::regLocation(lhsLocation, rhsLocation).asGPRlo(), resultLocation.asGPRlo());
+                m_jit.and32(TrustedImm32(static_cast<int32_t>(ImmHelpers::imm(lhs, rhs).asI64() >> 32)), resultLocation.asGPRhi());
+                m_jit.and32(TrustedImm32(static_cast<int32_t>(ImmHelpers::imm(lhs, rhs).asI64() & 0xffffffff)), resultLocation.asGPRlo());
+            )
+        );
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addI32Xor(Value lhs, Value rhs, Value& result)
     {
@@ -5349,6 +7467,7 @@ public:
         );
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64Xor(Value lhs, Value rhs, Value& result)
     {
         EMIT_BINARY(
@@ -5363,6 +7482,25 @@ public:
             )
         );
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI64Xor(Value lhs, Value rhs, Value& result)
+    {
+        EMIT_BINARY(
+            "I64Xor", TypeKind::I64,
+            BLOCK(Value::fromI64(lhs.asI64() ^ rhs.asI64())),
+            BLOCK(
+                m_jit.xor32(lhsLocation.asGPRhi(), rhsLocation.asGPRhi(), resultLocation.asGPRhi());
+                m_jit.xor32(lhsLocation.asGPRlo(), rhsLocation.asGPRlo(), resultLocation.asGPRlo());
+            ),
+            BLOCK(
+                m_jit.move(ImmHelpers::regLocation(lhsLocation, rhsLocation).asGPRhi(), resultLocation.asGPRhi());
+                m_jit.move(ImmHelpers::regLocation(lhsLocation, rhsLocation).asGPRlo(), resultLocation.asGPRlo());
+                m_jit.xor32(TrustedImm32(static_cast<int32_t>(ImmHelpers::imm(lhs, rhs).asI64() >> 32)), resultLocation.asGPRhi());
+                m_jit.xor32(TrustedImm32(static_cast<int32_t>(ImmHelpers::imm(lhs, rhs).asI64() & 0xffffffff)), resultLocation.asGPRlo());
+            )
+        );
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addI32Or(Value lhs, Value rhs, Value& result)
     {
@@ -5379,6 +7517,7 @@ public:
         );
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64Or(Value lhs, Value rhs, Value& result)
     {
         EMIT_BINARY(
@@ -5393,6 +7532,25 @@ public:
             )
         );
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI64Or(Value lhs, Value rhs, Value& result)
+    {
+        EMIT_BINARY(
+            "I64Or", TypeKind::I64,
+            BLOCK(Value::fromI64(lhs.asI64() | rhs.asI64())),
+            BLOCK(
+                m_jit.or32(lhsLocation.asGPRhi(), rhsLocation.asGPRhi(), resultLocation.asGPRhi());
+                m_jit.or32(lhsLocation.asGPRlo(), rhsLocation.asGPRlo(), resultLocation.asGPRlo());
+            ),
+            BLOCK(
+                m_jit.move(ImmHelpers::regLocation(lhsLocation, rhsLocation).asGPRhi(), resultLocation.asGPRhi());
+                m_jit.move(ImmHelpers::regLocation(lhsLocation, rhsLocation).asGPRlo(), resultLocation.asGPRlo());
+                m_jit.or32(TrustedImm32(static_cast<int32_t>(ImmHelpers::imm(lhs, rhs).asI64() >> 32)), resultLocation.asGPRhi());
+                m_jit.or32(TrustedImm32(static_cast<int32_t>(ImmHelpers::imm(lhs, rhs).asI64() & 0xffffffff)), resultLocation.asGPRlo());
+            )
+        );
+    }
+#endif
 
 #if CPU(X86_64)
 #define PREPARE_FOR_SHIFT \
@@ -5434,6 +7592,7 @@ public:
         );
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64Shl(Value lhs, Value rhs, Value& result)
     {
         PREPARE_FOR_SHIFT;
@@ -5455,6 +7614,24 @@ public:
             )
         );
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI64Shl(Value lhs, Value rhs, Value& result)
+    {
+        PREPARE_FOR_SHIFT;
+        EMIT_BINARY(
+            "I64Shl", TypeKind::I64,
+            BLOCK(Value::fromI64(lhs.asI64() << rhs.asI64())),
+            BLOCK(
+                shiftI64Helper32(ShiftI64Helper32Op::Lshift, lhsLocation, rhsLocation, resultLocation);
+            ),
+            BLOCK(
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2));
+                shiftI64Helper32(ShiftI64Helper32Op::Lshift, lhsLocation, rhsLocation, resultLocation);
+            )
+        );
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addI32ShrS(Value lhs, Value rhs, Value& result)
     {
@@ -5478,6 +7655,7 @@ public:
         );
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64ShrS(Value lhs, Value rhs, Value& result)
     {
         PREPARE_FOR_SHIFT;
@@ -5499,6 +7677,24 @@ public:
             )
         );
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI64ShrS(Value lhs, Value rhs, Value& result)
+    {
+        PREPARE_FOR_SHIFT;
+        EMIT_BINARY(
+            "I64ShrS", TypeKind::I64,
+            BLOCK(Value::fromI64(lhs.asI64() >> rhs.asI64())),
+            BLOCK(
+                shiftI64Helper32(ShiftI64Helper32Op::Rshift, lhsLocation, rhsLocation, resultLocation);
+            ),
+            BLOCK(
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2));
+                shiftI64Helper32(ShiftI64Helper32Op::Rshift, lhsLocation, rhsLocation, resultLocation);
+            )
+        );
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addI32ShrU(Value lhs, Value rhs, Value& result)
     {
@@ -5522,6 +7718,7 @@ public:
         );
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64ShrU(Value lhs, Value rhs, Value& result)
     {
         PREPARE_FOR_SHIFT;
@@ -5543,6 +7740,80 @@ public:
             )
         );
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI64ShrU(Value lhs, Value rhs, Value& result)
+    {
+        PREPARE_FOR_SHIFT;
+        EMIT_BINARY(
+            "I64ShrU", TypeKind::I64,
+            BLOCK(Value::fromI64(static_cast<uint64_t>(lhs.asI64()) >> static_cast<uint64_t>(rhs.asI64()))),
+            BLOCK(
+                shiftI64Helper32(ShiftI64Helper32Op::Urshift, lhsLocation, rhsLocation, resultLocation);
+            ),
+            BLOCK(
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2));
+                shiftI64Helper32(ShiftI64Helper32Op::Urshift, lhsLocation, rhsLocation, resultLocation);
+            )
+        );
+    }
+#endif
+
+#if USE(JSVALUE32_64)
+    enum class ShiftI64Helper32Op { Lshift, Urshift, Rshift };
+    void shiftI64Helper32(ShiftI64Helper32Op op, Location lhsLocation, Location rhsLocation, Location resultLocation)
+    {
+        auto shift = rhsLocation.asGPRlo();
+        m_jit.and32(TrustedImm32(63), rhsLocation.asGPRlo(), shift);
+        auto zero = m_jit.branch32(RelationalCondition::Equal, shift, TrustedImm32(0));
+        auto aboveOrEqual32 = m_jit.branch32(RelationalCondition::AboveOrEqual, shift, TrustedImm32(32));
+        // shift < 32
+        ScratchScope<1, 0> scratches(*this, lhsLocation, rhsLocation, resultLocation);
+        auto carry = scratches.gpr(0);
+        m_jit.move(TrustedImm32(32), carry);
+        m_jit.sub32(carry, shift, carry);
+        if (op == ShiftI64Helper32Op::Lshift) {
+            ASSERT(resultLocation.asGPRhi() != shift);
+            ASSERT(resultLocation.asGPRhi() != lhsLocation.asGPRlo());
+            m_jit.lshift32(lhsLocation.asGPRhi(), shift, resultLocation.asGPRhi());
+            m_jit.urshift32(lhsLocation.asGPRlo(), carry, carry);
+            m_jit.or32(carry, resultLocation.asGPRhi());
+            m_jit.lshift32(lhsLocation.asGPRlo(), shift, resultLocation.asGPRlo());
+        } else if (op == ShiftI64Helper32Op::Urshift) {
+            m_jit.lshift32(lhsLocation.asGPRhi(), carry, carry);
+            ASSERT(resultLocation.asGPRhi() != shift);
+            ASSERT(resultLocation.asGPRhi() != lhsLocation.asGPRlo());
+            m_jit.urshift32(lhsLocation.asGPRhi(), shift, resultLocation.asGPRhi());
+            m_jit.urshift32(lhsLocation.asGPRlo(), shift, resultLocation.asGPRlo());
+            m_jit.or32(carry, resultLocation.asGPRlo());
+        } else if (op ==ShiftI64Helper32Op::Rshift) {
+            m_jit.lshift32(lhsLocation.asGPRhi(), carry, carry);
+            ASSERT(resultLocation.asGPRhi() != shift);
+            ASSERT(resultLocation.asGPRhi() != lhsLocation.asGPRlo());
+            m_jit.rshift32(lhsLocation.asGPRhi(), shift, resultLocation.asGPRhi());
+            m_jit.urshift32(lhsLocation.asGPRlo(), shift, resultLocation.asGPRlo());
+            m_jit.or32(carry, resultLocation.asGPRlo());
+        }
+        auto done = m_jit.jump();
+        // shift >= 32
+        aboveOrEqual32.link(&m_jit);
+        m_jit.sub32(shift, TrustedImm32(32), shift);
+        if (op == ShiftI64Helper32Op::Lshift) {
+            m_jit.lshift32(lhsLocation.asGPRlo(), shift, resultLocation.asGPRhi());
+            m_jit.xor32(resultLocation.asGPRlo(), resultLocation.asGPRlo());
+        } else if (op == ShiftI64Helper32Op::Urshift) {
+            m_jit.urshift32(lhsLocation.asGPRhi(), shift, resultLocation.asGPRlo());
+            m_jit.xor32(resultLocation.asGPRhi(), resultLocation.asGPRhi());
+        } else if (op ==ShiftI64Helper32Op::Rshift) {
+            ASSERT(resultLocation.asGPRlo() != lhsLocation.asGPRhi());
+            m_jit.rshift32(lhsLocation.asGPRhi(), shift, resultLocation.asGPRlo());
+            m_jit.rshift32(lhsLocation.asGPRhi(), TrustedImm32(31), resultLocation.asGPRhi());
+        }
+        // shift == 0
+        zero.link(&m_jit);
+        done.link(&m_jit);
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addI32Rotl(Value lhs, Value rhs, Value& result)
     {
@@ -5584,6 +7855,7 @@ public:
         );
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64Rotl(Value lhs, Value rhs, Value& result)
     {
         PREPARE_FOR_SHIFT;
@@ -5623,6 +7895,24 @@ public:
 #endif
         );
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI64Rotl(Value lhs, Value rhs, Value& result)
+    {
+        PREPARE_FOR_SHIFT;
+        EMIT_BINARY(
+            "I64Rotl", TypeKind::I64,
+            BLOCK(Value::fromI64(B3::rotateLeft(lhs.asI64(), rhs.asI64()))),
+            BLOCK(
+                rotI64Helper32(RotI64Helper32Op::Left, lhsLocation, rhsLocation, resultLocation);
+            ),
+            BLOCK(
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2));
+                rotI64Helper32(RotI64Helper32Op::Left, lhsLocation, rhsLocation, resultLocation);
+            )
+        );
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addI32Rotr(Value lhs, Value rhs, Value& result)
     {
@@ -5646,6 +7936,7 @@ public:
         );
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64Rotr(Value lhs, Value rhs, Value& result)
     {
         PREPARE_FOR_SHIFT;
@@ -5667,6 +7958,63 @@ public:
             )
         );
     }
+#else
+PartialResult WARN_UNUSED_RETURN addI64Rotr(Value lhs, Value rhs, Value& result)
+    {
+        PREPARE_FOR_SHIFT;
+        EMIT_BINARY(
+            "I64Rotr", TypeKind::I64,
+            BLOCK(Value::fromI64(B3::rotateRight(lhs.asI64(), rhs.asI64()))),
+            BLOCK(
+                rotI64Helper32(RotI64Helper32Op::Right, lhsLocation, rhsLocation, resultLocation);
+            ),
+            BLOCK(
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2));
+                rotI64Helper32(RotI64Helper32Op::Right, lhsLocation, rhsLocation, resultLocation);
+            )
+        );
+    }
+#endif
+
+#if USE(JSVALUE32_64)
+    enum class RotI64Helper32Op { Left, Right };
+    void rotI64Helper32(RotI64Helper32Op op, Location lhsLocation, Location rhsLocation, Location resultLocation)
+    {
+        // NB: this only works as long as result is allocated in lhsLocation!
+        auto carry = rhsLocation.asGPRhi();
+        auto shift = rhsLocation.asGPRlo();
+        ScratchScope<2, 0> scratches(*this, lhsLocation, rhsLocation, resultLocation);
+        auto tmpHi = scratches.gpr(0);
+        auto tmpLo = scratches.gpr(1);
+        m_jit.move(lhsLocation.asGPRhi(), resultLocation.asGPRhi());
+        m_jit.move(lhsLocation.asGPRlo(), resultLocation.asGPRlo());
+        m_jit.and32(TrustedImm32(63), shift, shift);
+        auto rotate = m_jit.branch32(RelationalCondition::LessThan, shift, TrustedImm32(32));
+        // swap
+        m_jit.swap(resultLocation.asGPRhi(), resultLocation.asGPRlo());
+        rotate.link(&m_jit);
+        m_jit.and32(TrustedImm32(31), shift, shift);
+        auto zero = m_jit.branch32(RelationalCondition::Equal, shift, TrustedImm32(0));
+        // rotate
+        m_jit.move(TrustedImm32(32), carry);
+        m_jit.sub32(carry, shift, carry);
+        if (op == RotI64Helper32Op::Left) {
+            m_jit.urshift32(resultLocation.asGPRhi(), carry, tmpLo);
+            m_jit.urshift32(resultLocation.asGPRlo(), carry, tmpHi);
+            m_jit.lshift32(resultLocation.asGPRhi(), shift, resultLocation.asGPRhi());
+            m_jit.lshift32(resultLocation.asGPRlo(), shift, resultLocation.asGPRlo());
+        } else if (op == RotI64Helper32Op::Right) {
+            m_jit.lshift32(resultLocation.asGPRhi(), carry, tmpLo);
+            m_jit.lshift32(resultLocation.asGPRlo(), carry, tmpHi);
+            m_jit.urshift32(resultLocation.asGPRhi(), shift, resultLocation.asGPRhi());
+            m_jit.urshift32(resultLocation.asGPRlo(), shift, resultLocation.asGPRlo());
+        }
+        m_jit.or32(tmpHi, resultLocation.asGPRhi());
+        m_jit.or32(tmpLo, resultLocation.asGPRlo());
+        zero.link(&m_jit);
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addI32Clz(Value operand, Value& result)
     {
@@ -5679,6 +8027,7 @@ public:
         );
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64Clz(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -5689,6 +8038,24 @@ public:
             )
         );
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI64Clz(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "I64Clz", TypeKind::I64,
+            BLOCK(Value::fromI64(WTF::clz(operand.asI64()))),
+            BLOCK(
+                m_jit.countLeadingZeros32(operandLocation.asGPRhi(), resultLocation.asGPRhi());
+                Jump done = m_jit.branch32(RelationalCondition::LessThan, resultLocation.asGPRhi(), TrustedImm32(32));
+                m_jit.countLeadingZeros32(operandLocation.asGPRlo(), resultLocation.asGPRhi());
+                m_jit.add32(TrustedImm32(32), resultLocation.asGPRhi());
+                done.link(&m_jit);
+                m_jit.move(resultLocation.asGPRhi(), resultLocation.asGPRlo());
+                m_jit.xor32(resultLocation.asGPRhi(), resultLocation.asGPRhi());
+            )
+        );
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addI32Ctz(Value operand, Value& result)
     {
@@ -5701,6 +8068,7 @@ public:
         );
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64Ctz(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -5711,6 +8079,23 @@ public:
             )
         );
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI64Ctz(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "I64Ctz", TypeKind::I64,
+            BLOCK(Value::fromI64(WTF::ctz(operand.asI64()))),
+            BLOCK(
+                m_jit.countTrailingZeros32(operandLocation.asGPRlo(), resultLocation.asGPRlo());
+                Jump done = m_jit.branch32(RelationalCondition::LessThan, resultLocation.asGPRlo(), TrustedImm32(32));
+                m_jit.countTrailingZeros32(operandLocation.asGPRhi(), resultLocation.asGPRlo());
+                m_jit.add32(TrustedImm32(32), resultLocation.asGPRlo());
+                done.link(&m_jit);
+                m_jit.xor32(resultLocation.asGPRhi(), resultLocation.asGPRhi());
+            )
+        );
+    }
+#endif
 
     PartialResult emitCompareI32(const char* opcode, Value& lhs, Value& rhs, Value& result, RelationalCondition condition, bool (*comparator)(int32_t lhs, int32_t rhs))
     {
@@ -5729,6 +8114,7 @@ public:
         )
     }
 
+#if USE(JSVALUE64)
     PartialResult emitCompareI64(const char* opcode, Value& lhs, Value& rhs, Value& result, RelationalCondition condition, bool (*comparator)(int64_t lhs, int64_t rhs))
     {
         EMIT_BINARY(
@@ -5744,6 +8130,61 @@ public:
             )
         )
     }
+#else
+    PartialResult emitCompareI64(const char* opcode, Value& lhs, Value& rhs, Value& result, RelationalCondition condition, bool (*comparator)(int64_t lhs, int64_t rhs))
+    {
+        EMIT_BINARY(
+            opcode, TypeKind::I32,
+            BLOCK(Value::fromI32(static_cast<int32_t>(comparator(lhs.asI64(), rhs.asI64())))),
+            BLOCK(
+                compareI64Helper32(condition, lhsLocation, rhsLocation, resultLocation);
+            ),
+            BLOCK(
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2));
+                compareI64Helper32(condition, lhsLocation, rhsLocation, resultLocation);
+            )
+        )
+    }
+
+    void compareI64Helper32(RelationalCondition condition, Location lhsLocation, Location rhsLocation, Location resultLocation)
+    {
+        if (condition == MacroAssembler::Equal || condition == MacroAssembler::NotEqual) {
+            ScratchScope<1, 0> scratches(*this, lhsLocation, rhsLocation, resultLocation);
+            auto tmp = Location::fromGPR(scratches.gpr(0));
+            m_jit.move(TrustedImm32(condition == MacroAssembler::NotEqual), tmp.asGPR());
+            auto compareLo = m_jit.branch32(RelationalCondition::NotEqual, lhsLocation.asGPRhi(), rhsLocation.asGPRhi());
+            m_jit.compare32(condition, lhsLocation.asGPRlo(), rhsLocation.asGPRlo(), tmp.asGPR());
+            compareLo.link(&m_jit);
+            m_jit.move(tmp.asGPR(), resultLocation.asGPR());
+        } else {
+            auto compareLo = m_jit.branch32(RelationalCondition::Equal, lhsLocation.asGPRhi(), rhsLocation.asGPRhi());
+            m_jit.compare32(condition, lhsLocation.asGPRhi(), rhsLocation.asGPRhi(), resultLocation.asGPR());
+            auto done = m_jit.jump();
+            compareLo.link(&m_jit);
+            // Signed to unsigned, leave the rest alone
+            RelationalCondition loCond = condition;
+            switch (condition) {
+            case MacroAssembler::GreaterThan:
+                loCond = MacroAssembler::Above;
+                break;
+            case MacroAssembler::LessThan:
+                loCond = MacroAssembler::Below;
+                break;
+            case MacroAssembler::GreaterThanOrEqual:
+                loCond = MacroAssembler::AboveOrEqual;
+                break;
+            case MacroAssembler::LessThanOrEqual:
+                loCond = MacroAssembler::BelowOrEqual;
+                break;
+            default:
+                break;
+            }
+            m_jit.compare32(loCond, lhsLocation.asGPRlo(), rhsLocation.asGPRlo(), resultLocation.asGPR());
+            done.link(&m_jit);
+        }
+    }
+#endif
 
 #define RELOP_AS_LAMBDA(op) [](auto lhs, auto rhs) -> auto { return lhs op rhs; }
 #define TYPED_RELOP_AS_LAMBDA(type, op) [](auto lhs, auto rhs) -> auto { return static_cast<type>(lhs) op static_cast<type>(rhs); }
@@ -5943,6 +8384,7 @@ public:
 #undef RELOP_AS_LAMBDA
 #undef TYPED_RELOP_AS_LAMBDA
 
+#if USE(JSVALUE64)
     PartialResult addI32WrapI64(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -5953,6 +8395,18 @@ public:
             )
         )
     }
+#else
+    PartialResult addI32WrapI64(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "I32WrapI64", TypeKind::I32,
+            BLOCK(Value::fromI32(static_cast<int32_t>(operand.asI64()))),
+            BLOCK(
+                m_jit.move(operandLocation.asGPRlo(), resultLocation.asGPR());
+            )
+        )
+    }
+#endif
 
     PartialResult addI32Extend8S(Value operand, Value& result)
     {
@@ -5976,6 +8430,7 @@ public:
         )
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64Extend8S(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -5986,7 +8441,22 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI64Extend8S(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "I64Extend8S", TypeKind::I64,
+            BLOCK(Value::fromI64(static_cast<int64_t>(static_cast<int8_t>(operand.asI64())))),
+            BLOCK(
+                GPRReg operandReg = operandLocation.isGPR() ? operandLocation.asGPR() : operandLocation.asGPRlo();
+                m_jit.signExtend8To32(operandReg, resultLocation.asGPRlo());
+                m_jit.rshift32(resultLocation.asGPRlo(), TrustedImm32(31), resultLocation.asGPRhi());
+            )
+        )
+    }
+#endif
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64Extend16S(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -5997,7 +8467,22 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI64Extend16S(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "I64Extend16S", TypeKind::I64,
+            BLOCK(Value::fromI64(static_cast<int64_t>(static_cast<int16_t>(operand.asI64())))),
+            BLOCK(
+                GPRReg operandReg = operandLocation.isGPR() ? operandLocation.asGPR() : operandLocation.asGPRlo();
+                m_jit.signExtend16To32(operandReg, resultLocation.asGPRlo());
+                m_jit.rshift32(resultLocation.asGPRlo(), TrustedImm32(31), resultLocation.asGPRhi());
+            )
+        )
+    }
+#endif
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64Extend32S(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6008,7 +8493,22 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI64Extend32S(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "I64Extend32S", TypeKind::I64,
+            BLOCK(Value::fromI64(static_cast<int64_t>(static_cast<int32_t>(operand.asI64())))),
+            BLOCK(
+                GPRReg operandReg = operandLocation.isGPR() ? operandLocation.asGPR() : operandLocation.asGPRlo();
+                m_jit.move(operandReg, resultLocation.asGPRlo());
+                m_jit.rshift32(resultLocation.asGPRlo(), TrustedImm32(31), resultLocation.asGPRhi());
+            )
+        )
+    }
+#endif
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64ExtendSI32(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6019,7 +8519,22 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI64ExtendSI32(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "I64ExtendSI32", TypeKind::I64,
+            BLOCK(Value::fromI64(static_cast<int64_t>(operand.asI32()))),
+            BLOCK(
+                GPRReg operandReg = operandLocation.isGPR() ? operandLocation.asGPR() : operandLocation.asGPRlo();
+                m_jit.move(operandReg, resultLocation.asGPRlo());
+                m_jit.rshift32(resultLocation.asGPRlo(), TrustedImm32(31), resultLocation.asGPRhi());
+            )
+        )
+    }
+#endif
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64ExtendUI32(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6030,6 +8545,20 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI64ExtendUI32(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "I64ExtendUI32", TypeKind::I64,
+            BLOCK(Value::fromI64(static_cast<uint64_t>(static_cast<uint32_t>(operand.asI32())))),
+            BLOCK(
+                GPRReg operandReg = operandLocation.isGPR() ? operandLocation.asGPR() : operandLocation.asGPRlo();
+                m_jit.move(operandReg, resultLocation.asGPRlo());
+                m_jit.xor32(resultLocation.asGPRhi(), resultLocation.asGPRhi());
+            )
+        )
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addI32Eqz(Value operand, Value& result)
     {
@@ -6042,6 +8571,7 @@ public:
         )
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64Eqz(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6052,6 +8582,19 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI64Eqz(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "I64Eqz", TypeKind::I32,
+            BLOCK(Value::fromI32(!operand.asI64())),
+            BLOCK(
+                m_jit.or32(operandLocation.asGPRhi(), operandLocation.asGPRlo(), resultLocation.asGPR());
+                m_jit.test32(ResultCondition::Zero, resultLocation.asGPR(), resultLocation.asGPR(), resultLocation.asGPR());
+            )
+        )
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addI32Popcnt(Value operand, Value& result)
     {
@@ -6071,7 +8614,8 @@ public:
                     //
                     // We avoid this by consuming the result before passing it to emitCCall, which also saves us the mov for spilling.
                     consume(result);
-                    emitCCall(&operationPopcount32, Vector<Value> { operand }, result);
+                    auto arg = Value::pinned(TypeKind::I32, operandLocation);
+                    emitCCall(&operationPopcount32, Vector<Value> { arg }, result);
                 }
             )
         )
@@ -6095,7 +8639,8 @@ public:
                     //
                     // We avoid this by consuming the result before passing it to emitCCall, which also saves us the mov for spilling.
                     consume(result);
-                    emitCCall(&operationPopcount64, Vector<Value> { operand }, result);
+                    auto arg = Value::pinned(TypeKind::I64, operandLocation);
+                    emitCCall(&operationPopcount64, Vector<Value> { arg }, result);
                 }
             )
         )
@@ -6112,6 +8657,7 @@ public:
         )
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addI64ReinterpretF64(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6122,6 +8668,18 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addI64ReinterpretF64(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "I64ReinterpretF64", TypeKind::I64,
+            BLOCK(Value::fromI64(bitwise_cast<int64_t>(operand.asF64()))),
+            BLOCK(
+                m_jit.moveDoubleTo64(operandLocation.asFPR(), resultLocation.asGPRhi(), resultLocation.asGPRlo());
+            )
+        )
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addF32ReinterpretI32(Value operand, Value& result)
     {
@@ -6134,6 +8692,7 @@ public:
         )
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addF64ReinterpretI64(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6144,6 +8703,18 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addF64ReinterpretI64(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "F64ReinterpretI64", TypeKind::F64,
+            BLOCK(Value::fromF64(bitwise_cast<double>(operand.asI64()))),
+            BLOCK(
+                m_jit.moveIntsToDouble(operandLocation.asGPRlo(), operandLocation.asGPRhi(), resultLocation.asFPR());
+            )
+        )
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addF32DemoteF64(Value operand, Value& result)
     {
@@ -6178,6 +8749,7 @@ public:
         )
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addF32ConvertUI32(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6195,7 +8767,20 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addF32ConvertUI32(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "F32ConvertUI32", TypeKind::F32,
+            BLOCK(Value::fromF32(static_cast<uint32_t>(operand.asI32()))),
+            BLOCK(
+                m_jit.convertUInt32ToFloat(operandLocation.asGPR(), resultLocation.asFPR());
+            )
+        )
+    }
+#endif
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addF32ConvertSI64(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6206,7 +8791,22 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addF32ConvertSI64(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "F32ConvertSI64", TypeKind::F32,
+            BLOCK(Value::fromF32(operand.asI64())),
+            BLOCK(
+                auto arg = Value::pinned(TypeKind::I64, operandLocation);
+                consume(result);
+                emitCCall(Math::f32_convert_s_i64, Vector<Value> { arg }, result);
+            )
+        )
+    }
+#endif
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addF32ConvertUI64(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6221,6 +8821,20 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addF32ConvertUI64(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "F32ConvertUI64", TypeKind::F32,
+            BLOCK(Value::fromF32(static_cast<uint64_t>(operand.asI64()))),
+            BLOCK(
+                auto arg = Value::pinned(TypeKind::I64, operandLocation);
+                consume(result);
+                emitCCall(Math::f32_convert_u_i64, Vector<Value> { arg }, result);
+            )
+        )
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addF64ConvertSI32(Value operand, Value& result)
     {
@@ -6233,6 +8847,7 @@ public:
         )
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addF64ConvertUI32(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6250,7 +8865,20 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addF64ConvertUI32(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "F64ConvertUI32", TypeKind::F64,
+            BLOCK(Value::fromF64(static_cast<uint32_t>(operand.asI32()))),
+            BLOCK(
+                m_jit.convertUInt32ToDouble(operandLocation.asGPR(), resultLocation.asFPR());
+            )
+        )
+    }
+#endif
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addF64ConvertSI64(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6261,7 +8889,22 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addF64ConvertSI64(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "F64ConvertSI64", TypeKind::F64,
+            BLOCK(Value::fromF64(operand.asI64())),
+            BLOCK(
+                auto arg = Value::pinned(TypeKind::I64, operandLocation);
+                consume(result);
+                emitCCall(Math::f64_convert_s_i64, Vector<Value> { arg }, result);
+            )
+        )
+    }
+#endif
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addF64ConvertUI64(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6276,6 +8919,20 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addF64ConvertUI64(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "F64ConvertUI64", TypeKind::F64,
+            BLOCK(Value::fromF64(static_cast<uint64_t>(operand.asI64()))),
+            BLOCK(
+                auto arg = Value::pinned(TypeKind::I64, operandLocation);
+                consume(result);
+                emitCCall(Math::f64_convert_u_i64, Vector<Value> { arg }, result);
+            )
+        )
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addF32Copysign(Value lhs, Value rhs, Value& result)
     {
@@ -6330,6 +8987,7 @@ public:
         )
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addF64Copysign(Value lhs, Value rhs, Value& result)
     {
         if constexpr (isX86())
@@ -6393,7 +9051,47 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addF64Copysign(Value lhs, Value rhs, Value& result)
+    {
+        if constexpr (isX86())
+            clobber(shiftRCX);
 
+        EMIT_BINARY(
+            "F64Copysign", TypeKind::F64,
+            BLOCK(Value::fromF64(doubleCopySign(lhs.asF64(), rhs.asF64()))),
+            BLOCK(
+                F64CopysignHelper32(lhsLocation, rhsLocation, resultLocation);
+            ),
+            BLOCK(
+                ImmHelpers::immLocation(lhsLocation, rhsLocation) = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
+                emitMoveConst(ImmHelpers::imm(lhs, rhs), Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2));
+                F64CopysignHelper32(lhsLocation, rhsLocation, resultLocation);
+            )
+        )
+    }
+
+    void F64CopysignHelper32(Location lhsLocation, Location rhsLocation, Location resultLocation)
+    {
+        ScratchScope<2, 0> scratches(*this);
+        auto hi = scratches.gpr(1);
+        auto lo = scratches.gpr(0);
+        auto sign = wasmScratchGPR2;
+
+        m_jit.moveDoubleHiTo32(rhsLocation.asFPR(), sign);
+        m_jit.move(TrustedImm32(0x80000000), wasmScratchGPR);
+        m_jit.and32(wasmScratchGPR, sign);
+
+        m_jit.moveDoubleTo64(lhsLocation.asFPR(), hi, lo);
+        m_jit.move(TrustedImm32(0x7fffffff), wasmScratchGPR);
+        m_jit.and32(wasmScratchGPR, hi);
+
+        m_jit.or32(sign, hi);
+        m_jit.move64ToDouble(hi, lo, resultLocation.asFPR());
+    }
+#endif
+
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addF32Floor(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6404,7 +9102,22 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addF32Floor(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "F32Floor", TypeKind::F32,
+            BLOCK(Value::fromF32(Math::floorFloat(operand.asF32()))),
+            BLOCK(
+                auto arg = Value::pinned(TypeKind::F32, operandLocation);
+                consume(result);
+                emitCCall(Math::floorFloat, Vector<Value> { arg }, result);
+            )
+        )
+    }
+#endif
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addF64Floor(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6415,7 +9128,22 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addF64Floor(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "F64Floor", TypeKind::F64,
+            BLOCK(Value::fromF64(Math::floorDouble(operand.asF64()))),
+            BLOCK(
+                auto arg = Value::pinned(TypeKind::F64, operandLocation);
+                consume(result);
+                emitCCall(Math::floorDouble, Vector<Value> { arg }, result);
+            )
+        )
+    }
+#endif
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addF32Ceil(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6426,7 +9154,22 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addF32Ceil(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "F32Ceil", TypeKind::F32,
+            BLOCK(Value::fromF32(Math::ceilFloat(operand.asF32()))),
+            BLOCK(
+                auto arg = Value::pinned(TypeKind::F32, operandLocation);
+                consume(result);
+                emitCCall(Math::ceilFloat, Vector<Value> { arg }, result);
+            )
+        )
+    }
+#endif
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addF64Ceil(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6437,6 +9180,20 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addF64Ceil(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "F64Ceil", TypeKind::F64,
+            BLOCK(Value::fromF64(Math::ceilDouble(operand.asF64()))),
+            BLOCK(
+                auto arg = Value::pinned(TypeKind::F64, operandLocation);
+                consume(result);
+                emitCCall(Math::ceilDouble, Vector<Value> { arg }, result);
+            )
+        )
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addF32Abs(Value operand, Value& result)
     {
@@ -6526,6 +9283,7 @@ public:
         )
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addF32Nearest(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6536,7 +9294,22 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addF32Nearest(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "F32Nearest", TypeKind::F32,
+            BLOCK(Value::fromF32(std::nearbyintf(operand.asF32()))),
+            BLOCK(
+                auto arg = Value::pinned(TypeKind::F32, operandLocation);
+                consume(result);
+                emitCCall(Math::f32_nearest, Vector<Value> { arg }, result);
+            )
+        )
+    }
+#endif
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addF64Nearest(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6547,7 +9320,22 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addF64Nearest(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "F64Nearest", TypeKind::F64,
+            BLOCK(Value::fromF64(std::nearbyint(operand.asF64()))),
+            BLOCK(
+                auto arg = Value::pinned(TypeKind::F64, operandLocation);
+                consume(result);
+                emitCCall(Math::f64_nearest, Vector<Value> { arg }, result);
+            )
+        )
+    }
+#endif
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addF32Trunc(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6558,7 +9346,22 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addF32Trunc(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "F32Trunc", TypeKind::F32,
+            BLOCK(Value::fromF32(Math::truncFloat(operand.asF32()))),
+            BLOCK(
+                auto arg = Value::pinned(TypeKind::F32, operandLocation);
+                consume(result);
+                emitCCall(Math::truncFloat, Vector<Value> { arg }, result);
+            )
+        )
+    }
+#endif
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addF64Trunc(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6569,6 +9372,20 @@ public:
             )
         )
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addF64Trunc(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "F64Trunc", TypeKind::F64,
+            BLOCK(Value::fromF64(Math::truncDouble(operand.asF64()))),
+            BLOCK(
+                auto arg = Value::pinned(TypeKind::F64, operandLocation);
+                consume(result);
+                emitCCall(Math::truncDouble, Vector<Value> { arg }, result);
+            )
+        )
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addI32TruncSF32(Value operand, Value& result)
     {
@@ -6612,6 +9429,7 @@ public:
 
     // References
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addRefIsNull(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -6624,7 +9442,21 @@ public:
         );
         return { };
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addRefIsNull(Value operand, Value& result)
+    {
+        EMIT_UNARY(
+            "RefIsNull", TypeKind::I32,
+            BLOCK(Value::fromI32(operand.asRef() == JSValue::encode(jsNull()))),
+            BLOCK(
+                m_jit.compare32(RelationalCondition::Equal, operandLocation.asGPRhi(), TrustedImm32(JSValue::NullTag), resultLocation.asGPR());
+            )
+        );
+        return { };
+    }
+#endif
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addRefAsNonNull(Value value, Value& result)
     {
         Location valueLocation;
@@ -6640,10 +9472,30 @@ public:
         Location resultLocation = allocate(result);
         ASSERT(JSValue::encode(jsNull()) >= 0 && JSValue::encode(jsNull()) <= INT32_MAX);
         throwExceptionIf(ExceptionType::NullRefAsNonNull, m_jit.branch64(RelationalCondition::Equal, valueLocation.asGPR(), TrustedImm32(static_cast<int32_t>(JSValue::encode(jsNull())))));
-        m_jit.move(valueLocation.asGPR(), resultLocation.asGPR());
+        emitMove(TypeKind::Ref, valueLocation, resultLocation);
 
         return { };
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addRefAsNonNull(Value value, Value& result)
+    {
+        Location valueLocation;
+        if (value.isConst()) {
+            valueLocation = Location::fromGPR2(wasmScratchGPR, wasmScratchGPR2);
+            emitMoveConst(value, valueLocation);
+        } else
+            valueLocation = loadIfNecessary(value);
+        ASSERT(valueLocation.isGPR2());
+        consume(value);
+
+        result = topValue(TypeKind::Ref);
+        Location resultLocation = allocate(result);
+        throwExceptionIf(ExceptionType::NullRefAsNonNull, m_jit.branch32(RelationalCondition::Equal, valueLocation.asGPRhi(), TrustedImm32(JSValue::NullTag)));
+        emitMove(TypeKind::Ref, valueLocation, resultLocation);
+
+        return { };
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addRefEq(Value ref0, Value ref1, Value& result)
     {
@@ -6674,8 +9526,9 @@ public:
         if (!m_tierUp)
             return;
 
+#if ENABLE(WEBASSEMBLY_OMGJIT)
         static_assert(GPRInfo::nonPreservedNonArgumentGPR0 == wasmScratchGPR);
-        m_jit.move(TrustedImmPtr(bitwise_cast<uintptr_t>(&m_tierUp->m_counter)), wasmScratchGPR);
+        m_jit.move(TrustedImm64(bitwise_cast<uintptr_t>(&m_tierUp->m_counter)), wasmScratchGPR);
         Jump tierUp = m_jit.branchAdd32(CCallHelpers::PositiveOrZero, TrustedImm32(TierUpCount::functionEntryIncrement()), Address(wasmScratchGPR));
         MacroAssembler::Label tierUpResume = m_jit.label();
         auto functionIndex = m_functionIndex;
@@ -6690,6 +9543,9 @@ public:
                 MacroAssembler::repatchNearCall(linkBuffer.locationOfNearCall<NoPtrTag>(call), CodeLocationLabel<JITThunkPtrTag>(Thunks::singleton().stub(triggerOMGEntryTierUpThunkGenerator(usesSIMD)).code()));
             });
         });
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
     }
 
     // Control flow
@@ -6783,7 +9639,12 @@ public:
 #else
             unsigned count = size / 8;
             for (unsigned i = 0; i < count; ++i) {
+#if USE(JSVALUE64)
                 m_jit.store64(TrustedImm64(0), Address(GPRInfo::callFrameRegister, pointer));
+#else
+                m_jit.store32(TrustedImm32(0), Address(GPRInfo::callFrameRegister, pointer));
+                m_jit.store32(TrustedImm32(0), Address(GPRInfo::callFrameRegister, pointer+4));
+#endif
                 pointer += 8;
                 size -= 8;
             }
@@ -6885,7 +9746,12 @@ public:
 
         int frameSize = m_frameSize + m_maxCalleeStackSize;
         int roundedFrameSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), frameSize);
+#if USE(JSVALUE64)
         m_jit.subPtr(GPRInfo::callFrameRegister, TrustedImm32(roundedFrameSize), MacroAssembler::stackPointerRegister);
+#else
+        m_jit.subPtr(GPRInfo::callFrameRegister, TrustedImm32(roundedFrameSize), wasmScratchGPR);
+        m_jit.move(wasmScratchGPR, MacroAssembler::stackPointerRegister);
+#endif
 
         MacroAssembler::JumpList overflow;
         overflow.append(m_jit.branchPtr(CCallHelpers::Above, MacroAssembler::stackPointerRegister, GPRInfo::callFrameRegister));
@@ -7018,6 +9884,10 @@ public:
 
     void emitLoopTierUpCheck(const ControlData& data, Stack& enclosingStack, unsigned loopIndex)
     {
+        if (!m_tierUp)
+            return;
+
+#if ENABLE(WEBASSEMBLY_OMGJIT)
         ASSERT(m_tierUp->osrEntryTriggers().size() == loopIndex);
         m_tierUp->osrEntryTriggers().append(TierUpCount::TriggerReason::DontTrigger);
 
@@ -7026,7 +9896,7 @@ public:
         m_outerLoops.append(loopIndex);
 
         static_assert(GPRInfo::nonPreservedNonArgumentGPR0 == wasmScratchGPR);
-        m_jit.move(TrustedImm64(bitwise_cast<uintptr_t>(&m_tierUp->m_counter)), wasmScratchGPR);
+        m_jit.move(TrustedImmPtr(bitwise_cast<uintptr_t>(&m_tierUp->m_counter)), wasmScratchGPR);
 
         TierUpCount::TriggerReason* forceEntryTrigger = &(m_tierUp->osrEntryTriggers().last());
         static_assert(!static_cast<uint8_t>(TierUpCount::TriggerReason::DontTrigger), "the JIT code assumes non-zero means 'enter'");
@@ -7048,6 +9918,12 @@ public:
             jit.branchTestPtr(CCallHelpers::Zero, GPRInfo::nonPreservedNonArgumentGPR0).linkTo(tierUpResume, &jit);
             jit.farJump(GPRInfo::nonPreservedNonArgumentGPR0, WasmEntryPtrTag);
         });
+#else
+        UNUSED_PARAM(data);
+        UNUSED_PARAM(enclosingStack);
+        UNUSED_PARAM(loopIndex);
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
     }
 
     PartialResult WARN_UNUSED_RETURN addLoop(BlockSignature signature, Stack& enclosingStack, ControlType& result, Stack& newStack, uint32_t loopIndex)
@@ -7092,7 +9968,7 @@ public:
         if (condition.isConst() && !condition.asI32())
             result.setIfBranch(m_jit.jump()); // Emit direct branch if we know the condition is false.
         else if (!condition.isConst()) // Otherwise, we only emit a branch at all if we don't know the condition statically.
-            result.setIfBranch(m_jit.branchTest32(ResultCondition::Zero, GPRInfo::nonPreservedNonArgumentGPR1));
+            result.setIfBranch(m_jit.branchTest32(ResultCondition::Zero, conditionLocation.asGPR()));
         return { };
     }
 
@@ -7161,17 +10037,28 @@ public:
         return { };
     }
 
+#if USE(JSVALUE64)
     void emitCatchPrologue()
     {
         m_frameSizeLabels.append(m_jit.moveWithPatch(TrustedImmPtr(nullptr), GPRInfo::nonPreservedNonArgumentGPR0));
         m_jit.subPtr(GPRInfo::callFrameRegister, GPRInfo::nonPreservedNonArgumentGPR0, MacroAssembler::stackPointerRegister);
         if (!!m_info.memory) {
-            m_jit.loadPairPtr(GPRInfo::wasmContextInstancePointer, TrustedImm32(Instance::offsetOfCachedMemory()), GPRInfo::wasmBaseMemoryPointer, GPRInfo::wasmBoundsCheckingSizeRegister);
-            m_jit.cageConditionallyAndUntag(Gigacage::Primitive, GPRInfo::wasmBaseMemoryPointer, GPRInfo::wasmBoundsCheckingSizeRegister, wasmScratchGPR, /* validateAuth */ true, /* mayBeNull */ false);
+            loadWebAssemblyGlobalState(wasmBaseMemoryPointer, wasmBoundsCheckingSizeRegister);
         }
         static_assert(noOverlap(GPRInfo::nonPreservedNonArgumentGPR0, GPRInfo::returnValueGPR, GPRInfo::returnValueGPR2));
     }
+#else
+    void emitCatchPrologue()
+    {
+        m_frameSizeLabels.append(m_jit.moveWithPatch(TrustedImmPtr(nullptr), GPRInfo::nonPreservedNonArgumentGPR0));
+        m_jit.subPtr(GPRInfo::callFrameRegister, GPRInfo::nonPreservedNonArgumentGPR0, wasmScratchGPR);
+        m_jit.move(wasmScratchGPR, MacroAssembler::stackPointerRegister);
 
+        static_assert(noOverlap(GPRInfo::nonPreservedNonArgumentGPR0, GPRInfo::returnValueGPR, GPRInfo::returnValueGPR2));
+    }
+#endif
+
+#if USE(JSVALUE64)
     void emitCatchAllImpl(ControlData& dataCatch)
     {
         m_catchEntrypoints.append(m_jit.label());
@@ -7180,7 +10067,18 @@ public:
         Stack emptyStack { };
         dataCatch.startBlock(*this, emptyStack);
     }
+#else
+    void emitCatchAllImpl(ControlData& dataCatch)
+    {
+        m_catchEntrypoints.append(m_jit.label());
+        emitCatchPrologue();
+        bind(this->exception(dataCatch), Location::fromGPR2(GPRInfo::returnValueGPR2, GPRInfo::returnValueGPR));
+        Stack emptyStack { };
+        dataCatch.startBlock(*this, emptyStack);
+    }
+#endif
 
+#if USE(JSVALUE64)
     void emitCatchImpl(ControlData& dataCatch, const TypeDefinition& exceptionSignature, ResultList& results)
     {
         m_catchEntrypoints.append(m_jit.label());
@@ -7246,6 +10144,73 @@ public:
             }
         }
     }
+#else
+    void emitCatchImpl(ControlData& dataCatch, const TypeDefinition& exceptionSignature, ResultList& results)
+    {
+        m_catchEntrypoints.append(m_jit.label());
+        emitCatchPrologue();
+        bind(this->exception(dataCatch), Location::fromGPR2(GPRInfo::returnValueGPR2, GPRInfo::returnValueGPR));
+        Stack emptyStack { };
+        dataCatch.startBlock(*this, emptyStack);
+
+        if (exceptionSignature.as<FunctionSignature>()->argumentCount()) {
+            ScratchScope<1, 0> scratches(*this);
+            GPRReg bufferGPR = scratches.gpr(0);
+            m_jit.loadPtr(Address(GPRInfo::returnValueGPR, JSWebAssemblyException::offsetOfPayload() + JSWebAssemblyException::Payload::offsetOfStorage()), bufferGPR);
+            for (unsigned i = 0; i < exceptionSignature.as<FunctionSignature>()->argumentCount(); ++i) {
+                Type type = exceptionSignature.as<FunctionSignature>()->argumentType(i);
+                Value result = Value::fromTemp(type.kind, dataCatch.enclosedHeight() + dataCatch.implicitSlots() + i);
+                Location slot = canonicalSlot(result);
+                switch (type.kind) {
+                case TypeKind::I32:
+                    m_jit.load32(Address(bufferGPR, JSWebAssemblyException::Payload::Storage::offsetOfData() + i * sizeof(uint64_t)), wasmScratchGPR);
+                    m_jit.store32(wasmScratchGPR, slot.asAddress());
+                    break;
+                case TypeKind::I31ref:
+                case TypeKind::I64:
+                case TypeKind::Ref:
+                case TypeKind::RefNull:
+                case TypeKind::Arrayref:
+                case TypeKind::Structref:
+                case TypeKind::Funcref:
+                case TypeKind::Externref:
+                case TypeKind::Eqref:
+                case TypeKind::Anyref:
+                case TypeKind::Nullref:
+                case TypeKind::Nullfuncref:
+                case TypeKind::Nullexternref:
+                case TypeKind::Rec:
+                case TypeKind::Sub:
+                case TypeKind::Subfinal:
+                case TypeKind::Array:
+                case TypeKind::Struct:
+                case TypeKind::Func: {
+                    m_jit.loadPair32(Address(bufferGPR, JSWebAssemblyException::Payload::Storage::offsetOfData() + i * sizeof(uint64_t)), wasmScratchGPR, wasmScratchGPR2);
+                    m_jit.storePair32(wasmScratchGPR, wasmScratchGPR2, slot.asAddress());
+                    break;
+                }
+                case TypeKind::F32:
+                    m_jit.loadFloat(Address(bufferGPR, JSWebAssemblyException::Payload::Storage::offsetOfData() + i * sizeof(uint64_t)), wasmScratchFPR);
+                    m_jit.storeFloat(wasmScratchFPR, slot.asAddress());
+                    break;
+                case TypeKind::F64:
+                    m_jit.loadDouble(Address(bufferGPR, JSWebAssemblyException::Payload::Storage::offsetOfData() + i * sizeof(uint64_t)), wasmScratchFPR);
+                    m_jit.storeDouble(wasmScratchFPR, slot.asAddress());
+                    break;
+                case TypeKind::V128:
+                    materializeVectorConstant(v128_t { }, Location::fromFPR(wasmScratchFPR));
+                    m_jit.storeVector(wasmScratchFPR, slot.asAddress());
+                    break;
+                case TypeKind::Void:
+                    RELEASE_ASSERT_NOT_REACHED();
+                    break;
+                }
+                bind(result, slot);
+                results.append(result);
+            }
+        }
+    }
+#endif
 
     PartialResult WARN_UNUSED_RETURN addCatch(unsigned exceptionIndex, const TypeDefinition& exceptionSignature, Stack& expressionStack, ControlType& data, ResultList& results)
     {
@@ -7383,6 +10348,7 @@ public:
         return { };
     }
 
+#if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN addRethrow(unsigned, ControlType& data)
     {
         LOG_INSTRUCTION("Rethrow", exception(data));
@@ -7398,6 +10364,23 @@ public:
         emitRethrowImpl(m_jit);
         return { };
     }
+#else
+    PartialResult WARN_UNUSED_RETURN addRethrow(unsigned, ControlType& data)
+    {
+        LOG_INSTRUCTION("Rethrow", exception(data));
+
+        ++m_callSiteIndex;
+        bool mayHaveExceptionHandlers = !m_hasExceptionHandlers || m_hasExceptionHandlers.value();
+        if (mayHaveExceptionHandlers) {
+            m_jit.store32(CCallHelpers::TrustedImm32(m_callSiteIndex), CCallHelpers::tagFor(CallFrameSlot::argumentCountIncludingThis));
+            flushRegisters();
+        }
+        emitMove(this->exception(data), Location::fromGPR2(GPRInfo::argumentGPR3, GPRInfo::argumentGPR2));
+        m_jit.move(GPRInfo::wasmContextInstancePointer, GPRInfo::argumentGPR0);
+        emitRethrowImpl(m_jit);
+        return { };
+    }
+#endif
 
     void prepareForExceptions()
     {
@@ -7420,7 +10403,7 @@ public:
             Vector<Location, 8> returnLocationsForShuffle;
             for (unsigned i = 0; i < wasmCallInfo.results.size(); ++i) {
                 returnValuesForShuffle.append(returnValues[offset + i]);
-                returnLocationsForShuffle.append(Location::fromArgumentLocation(wasmCallInfo.results[i]));
+                returnLocationsForShuffle.append(Location::fromArgumentLocation(wasmCallInfo.results[i], returnValues[offset + i].type().kind));
             }
             emitShuffle(returnValuesForShuffle, returnLocationsForShuffle);
             LOG_INSTRUCTION("Return", returnLocationsForShuffle);
@@ -7506,7 +10489,10 @@ public:
             auto* jumpTable = m_callee.addJumpTable(targets.size());
             auto fallThrough = m_jit.branch32(RelationalCondition::AboveOrEqual, wasmScratchGPR, TrustedImm32(targets.size()));
             m_jit.zeroExtend32ToWord(wasmScratchGPR, wasmScratchGPR);
-            m_jit.lshiftPtr(TrustedImm32(3), wasmScratchGPR);
+            if constexpr (is64Bit())
+                m_jit.lshiftPtr(TrustedImm32(3), wasmScratchGPR);
+            else
+                m_jit.lshiftPtr(TrustedImm32(2), wasmScratchGPR);
             m_jit.addPtr(TrustedImmPtr(jumpTable->data()), wasmScratchGPR);
             m_jit.farJump(Address(wasmScratchGPR), JSSwitchPtrTag);
 
@@ -7602,7 +10588,8 @@ public:
             entryData.convertLoopToBlock();
             entryData.flushAndSingleExit(*this, entryData, entry.enclosedExpressionStack, false, true, unreachable);
             entryData.linkJumpsTo(entryData.loopLabel(), &m_jit);
-            m_outerLoops.takeLast();
+            if (m_tierUp)
+                m_outerLoops.takeLast();
             break;
         case BlockType::Try:
         case BlockType::Catch:
@@ -7624,14 +10611,27 @@ public:
         return { };
     }
 
+#if USE(JSVALUE64)
+    int alignedFrameSize(int frameSize)
+    {
+        return WTF::roundUpToMultipleOf(stackAlignmentBytes(), frameSize);
+    }
+#else
+    int alignedFrameSize(int frameSize)
+    {
+        // On armv7 account for misalignment due to of saved {FP, PC}
+        constexpr int misalignment = 4 + 4;
+        return WTF::roundUpToMultipleOf(stackAlignmentBytes(), frameSize + misalignment) - misalignment;
+    }
+#endif
+
     PartialResult WARN_UNUSED_RETURN endTopLevel(BlockSignature, const Stack&)
     {
         int frameSize = m_frameSize + m_maxCalleeStackSize;
         CCallHelpers& jit = m_jit;
-        m_jit.addLinkTask([frameSize, labels = WTFMove(m_frameSizeLabels), &jit](LinkBuffer& linkBuffer) {
-            int roundedFrameSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), frameSize);
+        m_jit.addLinkTask([frameSize, labels = WTFMove(m_frameSizeLabels), &jit, this](LinkBuffer& linkBuffer) {
             for (auto label : labels)
-                jit.repatchPointer(linkBuffer.locationOf<NoPtrTag>(label), bitwise_cast<void*>(static_cast<uintptr_t>(roundedFrameSize)));
+                jit.repatchPointer(linkBuffer.locationOf<NoPtrTag>(label), bitwise_cast<void*>(static_cast<uintptr_t>(alignedFrameSize(frameSize))));
         });
 
         LOG_DEDENT();
@@ -7673,16 +10673,28 @@ public:
         m_jit.loadPtr(Address(GPRInfo::callFrameRegister, CallFrameSlot::codeBlock * sizeof(Register)), GPRInfo::wasmContextInstancePointer);
     }
 
+#if USE(JSVALUE64)
     void restoreWebAssemblyGlobalState()
     {
         restoreWebAssemblyContextInstance();
         // FIXME: We should just store these registers on stack and load them.
-        if (!!m_info.memory) {
-            m_jit.loadPairPtr(GPRInfo::wasmContextInstancePointer, TrustedImm32(Instance::offsetOfCachedMemory()), GPRInfo::wasmBaseMemoryPointer, GPRInfo::wasmBoundsCheckingSizeRegister);
-            m_jit.cageConditionallyAndUntag(Gigacage::Primitive, GPRInfo::wasmBaseMemoryPointer, GPRInfo::wasmBoundsCheckingSizeRegister, wasmScratchGPR, /* validateAuth */ true, /* mayBeNull */ false);
-        }
+        if (!!m_info.memory)
+            loadWebAssemblyGlobalState(wasmBaseMemoryPointer, wasmBoundsCheckingSizeRegister);
+    }
+#else
+    void restoreWebAssemblyGlobalState()
+    {
+        restoreWebAssemblyContextInstance();
+    }
+#endif
+
+    void loadWebAssemblyGlobalState(GPRReg wasmBaseMemoryPointer, GPRReg wasmBoundsCheckingSizeRegister)
+    {
+        m_jit.loadPairPtr(GPRInfo::wasmContextInstancePointer, TrustedImm32(Instance::offsetOfCachedMemory()), wasmBaseMemoryPointer, wasmBoundsCheckingSizeRegister);
+        m_jit.cageConditionallyAndUntag(Gigacage::Primitive, wasmBaseMemoryPointer, wasmBoundsCheckingSizeRegister, wasmScratchGPR, /* validateAuth */ true, /* mayBeNull */ false);
     }
 
+#if USE(JSVALUE64)
     void restoreWebAssemblyGlobalStateAfterWasmCall()
     {
         if (!!m_info.memory && (m_mode == MemoryMode::Signaling || m_info.memory.isShared())) {
@@ -7691,12 +10703,18 @@ public:
             m_jit.loadPtr(Address(GPRInfo::callFrameRegister, CallFrameSlot::codeBlock * sizeof(Register)), wasmScratchGPR);
             Jump isSameInstanceAfter = m_jit.branchPtr(RelationalCondition::Equal, wasmScratchGPR, GPRInfo::wasmContextInstancePointer);
             m_jit.move(wasmScratchGPR, GPRInfo::wasmContextInstancePointer);
-            m_jit.loadPairPtr(GPRInfo::wasmContextInstancePointer, TrustedImm32(Instance::offsetOfCachedMemory()), GPRInfo::wasmBaseMemoryPointer, GPRInfo::wasmBoundsCheckingSizeRegister);
-            m_jit.cageConditionallyAndUntag(Gigacage::Primitive, GPRInfo::wasmBaseMemoryPointer, GPRInfo::wasmBoundsCheckingSizeRegister, wasmScratchGPR, /* validateAuth */ true, /* mayBeNull */ false);
+            m_jit.loadPairPtr(GPRInfo::wasmContextInstancePointer, TrustedImm32(Instance::offsetOfCachedMemory()), wasmBaseMemoryPointer, wasmBoundsCheckingSizeRegister);
+            m_jit.cageConditionallyAndUntag(Gigacage::Primitive, wasmBaseMemoryPointer, wasmBoundsCheckingSizeRegister, wasmScratchGPR, /* validateAuth */ true, /* mayBeNull */ false);
             isSameInstanceAfter.link(&m_jit);
         } else
             restoreWebAssemblyGlobalState();
     }
+#else
+    void restoreWebAssemblyGlobalStateAfterWasmCall()
+    {
+        restoreWebAssemblyGlobalState();
+    }
+#endif
 
     void flushRegistersForException()
     {
@@ -7727,7 +10745,7 @@ public:
     }
 
     template<size_t N>
-    void saveValuesAcrossCallAndPassArguments(const Vector<Value, N>& arguments, const CallInformation& callInfo)
+    void saveValuesAcrossCallAndPassArguments(const Vector<Value, N>& arguments, const CallInformation& callInfo, const TypeDefinition& signature)
     {
         // First, we resolve all the locations of the passed arguments, before any spillage occurs. For constants,
         // we store their normal values; for all other values, we store pinned values with their current location.
@@ -7757,18 +10775,32 @@ public:
         // think these will be handled by the caller-save logic without additional effort, but it doesn't hurt to be
         // careful.
         for (size_t i = 0; i < callInfo.params.size(); ++i) {
-            Location paramLocation = Location::fromArgumentLocation(callInfo.params[i]);
+            auto type = signature.as<FunctionSignature>()->argumentType(i);
+            Location paramLocation = Location::fromArgumentLocation(callInfo.params[i], type.kind);
             if (paramLocation.isRegister()) {
-                RegisterBinding binding = paramLocation.isGPR() ? m_gprBindings[paramLocation.asGPR()] : m_fprBindings[paramLocation.asFPR()];
+                RegisterBinding binding;
+                if (paramLocation.isGPR())
+                    binding = m_gprBindings[paramLocation.asGPR()];
+                else if (paramLocation.isFPR())
+                    binding = m_fprBindings[paramLocation.asFPR()];
+#if USE(JSVALUE32_64)
+                else if (paramLocation.isGPR2())
+                    binding = m_gprBindings[paramLocation.asGPRhi()];
+#endif
                 if (!binding.toValue().isNone())
                     flushValue(binding.toValue());
             }
         }
 
         // Finally, we parallel-move arguments to the parameter locations.
-        auto parameterLocations = WTF::map<N>(callInfo.params, [](auto& param) {
-            return Location::fromArgumentLocation(param);
-        });
+        WTF::Vector<Location, N> parameterLocations;
+        parameterLocations.reserveInitialCapacity(callInfo.params.size());
+        for (unsigned i = 0; i < callInfo.params.size(); i++) {
+            auto type = signature.as<FunctionSignature>()->argumentType(i);
+            auto parameterLocation = Location::fromArgumentLocation(callInfo.params[i], type.kind);
+            parameterLocations.append(parameterLocation);
+        }
+
         emitShuffle(resolvedArguments, parameterLocations);
     }
 
@@ -7784,9 +10816,17 @@ public:
     {
         for (size_t i = 0; i < callInfo.results.size(); i ++) {
             Value result = Value::fromTemp(functionType.returnType(i).kind, currentControlData().enclosedHeight() + currentControlData().implicitSlots() + m_parser->expressionStack().size() + i);
-            Location returnLocation = Location::fromArgumentLocation(callInfo.results[i]);
+            Location returnLocation = Location::fromArgumentLocation(callInfo.results[i], result.type());
             if (returnLocation.isRegister()) {
-                RegisterBinding& currentBinding = returnLocation.isGPR() ? m_gprBindings[returnLocation.asGPR()] : m_fprBindings[returnLocation.asFPR()];
+                RegisterBinding currentBinding;
+                if (returnLocation.isGPR())
+                    currentBinding = m_gprBindings[returnLocation.asGPR()];
+                else if (returnLocation.isFPR())
+                    currentBinding = m_fprBindings[returnLocation.asFPR()];
+#if USE(JSVALUE32_64)
+                else if (returnLocation.isGPR2())
+                    currentBinding = m_gprBindings[returnLocation.asGPRhi()];
+#endif
                 if (currentBinding.isScratch()) {
                     // FIXME: This is a total hack and could cause problems. We assume scratch registers (allocated by a ScratchScope)
                     // will never be live across a call. So far, this is probably true, but it's fragile. Probably the fix here is to
@@ -7795,6 +10835,13 @@ public:
                     if (returnLocation.isGPR()) {
                         ASSERT(m_validGPRs.contains(returnLocation.asGPR(), IgnoreVectors));
                         m_gprSet.add(returnLocation.asGPR(), IgnoreVectors);
+#if USE(JSVALUE32_64)
+                    } else if (returnLocation.isGPR2()) {
+                        ASSERT(m_validGPRs.contains(returnLocation.asGPRlo(), IgnoreVectors));
+                        ASSERT(m_validGPRs.contains(returnLocation.asGPRhi(), IgnoreVectors));
+                        m_gprSet.add(returnLocation.asGPRlo(), IgnoreVectors);
+                        m_gprSet.add(returnLocation.asGPRhi(), IgnoreVectors);
+#endif
                     } else {
                         ASSERT(m_validFPRs.contains(returnLocation.asFPR(), Width::Width128));
                         m_fprSet.add(returnLocation.asFPR(), Width::Width128);
@@ -7815,7 +10862,11 @@ public:
             return Type { value.type(), 0u };
         });
         RefPtr<TypeDefinition> functionType = TypeInformation::typeDefinitionForFunction(resultTypes, argumentTypes);
+#if CPU(ARM64) || CPU(X86_64)
         CallInformation callInfo = wasmCallingConvention().callInformationFor(*functionType, CallRole::Caller);
+#elif CPU(ARM)
+        CallInformation callInfo = cCallingConventionArmThumb2().callInformationFor(*functionType, CallRole::Caller);
+#endif
         Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), callInfo.headerAndArgumentStackSizeInBytes);
         m_maxCalleeStackSize = std::max<int>(calleeStackSize, m_maxCalleeStackSize);
 
@@ -7824,7 +10875,7 @@ public:
 
         // Preserve caller-saved registers and other info
         prepareForExceptions();
-        saveValuesAcrossCallAndPassArguments(arguments, callInfo);
+        saveValuesAcrossCallAndPassArguments(arguments, callInfo, *functionType);
 
         // Materialize address of native function and call register
         void* taggedFunctionPtr = tagCFunctionPtr<void*, OperationPtrTag>(function);
@@ -7844,7 +10895,11 @@ public:
         });
 
         RefPtr<TypeDefinition> functionType = TypeInformation::typeDefinitionForFunction(resultTypes, argumentTypes);
+#if CPU(ARM64) || CPU(X86_64)
         CallInformation callInfo = wasmCallingConvention().callInformationFor(*functionType, CallRole::Caller);
+#elif CPU(ARM)
+        CallInformation callInfo = cCallingConventionArmThumb2().callInformationFor(*functionType, CallRole::Caller);
+#endif
         Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), callInfo.headerAndArgumentStackSizeInBytes);
         m_maxCalleeStackSize = std::max<int>(calleeStackSize, m_maxCalleeStackSize);
 
@@ -7853,7 +10908,7 @@ public:
 
         // Preserve caller-saved registers and other info
         prepareForExceptions();
-        saveValuesAcrossCallAndPassArguments(arguments, callInfo);
+        saveValuesAcrossCallAndPassArguments(arguments, callInfo, *functionType);
 
         // Materialize address of native function and call register
         void* taggedFunctionPtr = tagCFunctionPtr<void*, OperationPtrTag>(function);
@@ -7863,6 +10918,10 @@ public:
         Location resultLocation;
         switch (result.type()) {
         case TypeKind::I32:
+#if USE(JSVALUE32_64)
+            resultLocation = Location::fromGPR(GPRInfo::returnValueGPR);
+            break;
+#endif
         case TypeKind::I31ref:
         case TypeKind::I64:
         case TypeKind::Ref:
@@ -7882,7 +10941,11 @@ public:
         case TypeKind::Array:
         case TypeKind::Struct:
         case TypeKind::Func: {
+#if USE(JSVALUE64)
             resultLocation = Location::fromGPR(GPRInfo::returnValueGPR);
+#else
+            resultLocation = Location::fromGPR2(GPRInfo::returnValueGPR2, GPRInfo::returnValueGPR);
+#endif
             ASSERT(m_validGPRs.contains(GPRInfo::returnValueGPR, IgnoreVectors));
             break;
         }
@@ -7902,7 +10965,15 @@ public:
             break;
         }
 
-        RegisterBinding& currentBinding = resultLocation.isGPR() ? m_gprBindings[resultLocation.asGPR()] : m_fprBindings[resultLocation.asFPR()];
+        RegisterBinding currentBinding;
+        if (resultLocation.isGPR())
+            currentBinding = m_gprBindings[resultLocation.asGPR()];
+        else if (resultLocation.isFPR())
+            currentBinding = m_fprBindings[resultLocation.asFPR()];
+#if USE(JSVALUE32_64)
+        else if (resultLocation.isGPR2())
+            currentBinding = m_gprBindings[resultLocation.asGPRhi()];
+#endif
         RELEASE_ASSERT(!currentBinding.isScratch());
 
         bind(result, resultLocation);
@@ -7918,7 +10989,7 @@ public:
 
         // Preserve caller-saved registers and other info
         prepareForExceptions();
-        saveValuesAcrossCallAndPassArguments(arguments, callInfo);
+        saveValuesAcrossCallAndPassArguments(arguments, callInfo, signature);
 
         if (m_info.isImportedFunctionFromFunctionIndexSpace(functionIndex)) {
             static_assert(sizeof(Instance::ImportFunctionInfo) * maxImports < std::numeric_limits<int32_t>::max());
@@ -7961,16 +11032,17 @@ public:
         // Do a context switch if needed.
         Jump isSameInstanceBefore = m_jit.branchPtr(RelationalCondition::Equal, calleeInstance, GPRInfo::wasmContextInstancePointer);
         m_jit.move(calleeInstance, GPRInfo::wasmContextInstancePointer);
-        m_jit.loadPairPtr(GPRInfo::wasmContextInstancePointer, TrustedImm32(Instance::offsetOfCachedMemory()), GPRInfo::wasmBaseMemoryPointer, GPRInfo::wasmBoundsCheckingSizeRegister);
-        m_jit.cageConditionallyAndUntag(Gigacage::Primitive, GPRInfo::wasmBaseMemoryPointer, GPRInfo::wasmBoundsCheckingSizeRegister, wasmScratchGPR, /* validateAuth */ true, /* mayBeNull */ false);
+#if USE(JSVALUE64)
+        loadWebAssemblyGlobalState(wasmBaseMemoryPointer, wasmBoundsCheckingSizeRegister);
+#endif
         isSameInstanceBefore.link(&m_jit);
 
         // Since this can switch instance, we need to keep JSWebAssemblyInstance anchored in the stack.
-        m_jit.storePtr(jsCalleeAnchor, Location::fromArgumentLocation(wasmCalleeInfo.thisArgument).asAddress());
+        m_jit.storePtr(jsCalleeAnchor, Location::fromArgumentLocation(wasmCalleeInfo.thisArgument, TypeKind::Void).asAddress());
 
         m_jit.loadPtr(Address(calleeCode), calleeCode);
         prepareForExceptions();
-        saveValuesAcrossCallAndPassArguments(arguments, wasmCalleeInfo); // Keep in mind that this clobbers wasmScratchGPR and wasmScratchFPR.
+        saveValuesAcrossCallAndPassArguments(arguments, wasmCalleeInfo, signature); // Keep in mind that this clobbers wasmScratchGPR and wasmScratchFPR.
 
         // Why can we still call calleeCode after saveValuesAcrossCallAndPassArguments? This is because we ensured that calleeCode is GPRInfo::nonPreservedNonArgumentGPR1,
         // and any argument locations will not include GPRInfo::nonPreservedNonArgumentGPR1.
@@ -8046,6 +11118,9 @@ public:
                     m_jit.zeroExtend32ToWord(calleeIndexLocation.asGPR(), calleeIndexLocation.asGPR());
 #if CPU(ARM64)
                     m_jit.addLeftShift64(callableFunctionBuffer, calleeIndexLocation.asGPR(), TrustedImm32(getLSBSet(sizeof(FuncRefTable::Function))), calleeSignatureIndex);
+#elif CPU(ARM)
+                    m_jit.lshift32(calleeIndexLocation.asGPR(), TrustedImm32(getLSBSet(sizeof(FuncRefTable::Function))), calleeSignatureIndex);
+                    m_jit.addPtr(callableFunctionBuffer, calleeSignatureIndex);
 #else
                     m_jit.lshift64(calleeIndexLocation.asGPR(), TrustedImm32(getLSBSet(sizeof(FuncRefTable::Function))), calleeSignatureIndex);
                     m_jit.addPtr(callableFunctionBuffer, calleeSignatureIndex);
@@ -8054,6 +11129,9 @@ public:
                     m_jit.move(TrustedImmPtr(sizeof(FuncRefTable::Function)), calleeSignatureIndex);
 #if CPU(ARM64)
                     m_jit.multiplyAddZeroExtend32(calleeIndexLocation.asGPR(), calleeSignatureIndex, callableFunctionBuffer, calleeSignatureIndex);
+#elif CPU(ARM)
+                    m_jit.mul32(calleeIndexLocation.asGPR(), calleeSignatureIndex);
+                    m_jit.addPtr(callableFunctionBuffer, calleeSignatureIndex);
 #else
                     m_jit.zeroExtend32ToWord(calleeIndexLocation.asGPR(), calleeIndexLocation.asGPR());
                     m_jit.mul64(calleeIndexLocation.asGPR(), calleeSignatureIndex);
@@ -8065,10 +11143,17 @@ public:
                 // We should move just to use a single branch and then figure out what
                 // error to use in the exception handler.
 
+#if USE(JSVALUE64)
                 ASSERT(static_cast<ptrdiff_t>(FuncRefTable::Function::offsetOfInstance() + sizeof(void*)) == FuncRefTable::Function::offsetOfValue());
                 m_jit.loadPairPtr(calleeSignatureIndex, TrustedImm32(FuncRefTable::Function::offsetOfInstance()), calleeInstance, jsCalleeAnchor);
                 ASSERT(static_cast<ptrdiff_t>(WasmToWasmImportableFunction::offsetOfSignatureIndex() + sizeof(void*)) == WasmToWasmImportableFunction::offsetOfEntrypointLoadLocation());
                 m_jit.loadPairPtr(calleeSignatureIndex, TrustedImm32(FuncRefTable::Function::offsetOfFunction() + WasmToWasmImportableFunction::offsetOfSignatureIndex()), calleeSignatureIndex, calleeCode);
+#else
+                m_jit.loadPtr(Address(calleeSignatureIndex, FuncRefTable::Function::offsetOfFunction() + WasmToWasmImportableFunction::offsetOfEntrypointLoadLocation()), calleeCode); // Pointer to callee code.
+                m_jit.loadPtr(Address(calleeSignatureIndex, FuncRefTable::Function::offsetOfInstance()), calleeInstance);
+                m_jit.loadPtr(Address(calleeSignatureIndex, FuncRefTable::Function::offsetOfValue()), jsCalleeAnchor);
+                m_jit.loadPtr(Address(calleeSignatureIndex, FuncRefTable::Function::offsetOfFunction() + WasmToWasmImportableFunction::offsetOfSignatureIndex()), calleeSignatureIndex);
+#endif
 
                 throwExceptionIf(ExceptionType::NullTableEntry, m_jit.branchTestPtr(ResultCondition::Zero, calleeSignatureIndex, calleeSignatureIndex));
                 throwExceptionIf(ExceptionType::BadSignature, m_jit.branchPtr(RelationalCondition::NotEqual, calleeSignatureIndex, TrustedImmPtr(TypeInformation::get(originalSignature))));
@@ -8088,6 +11173,7 @@ public:
         Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), callInfo.headerAndArgumentStackSizeInBytes);
         m_maxCalleeStackSize = std::max<int>(calleeStackSize, m_maxCalleeStackSize);
 
+        GPRReg calleePtr;
         GPRReg calleeInstance;
         GPRReg calleeCode;
         GPRReg jsCalleeAnchor;
@@ -8096,6 +11182,7 @@ public:
             calleeCode = calleeCodeScratch.gpr(0);
             calleeCodeScratch.unbindPreserved();
 
+#if USE(JSVALUE64)
             ScratchScope<2, 0> otherScratches(*this);
 
             Location calleeLocation;
@@ -8107,11 +11194,28 @@ public:
                 calleeLocation = loadIfNecessary(callee);
             emitThrowOnNullReference(ExceptionType::NullReference, calleeLocation);
 
+            calleePtr = calleeLocation.asGPR();
             calleeInstance = otherScratches.gpr(0);
             jsCalleeAnchor = otherScratches.gpr(1);
+#elif USE(JSVALUE32_64)
+            ScratchScope<3, 0> otherScratches(*this);
 
-            m_jit.loadPtr(MacroAssembler::Address(calleeLocation.asGPR(), WebAssemblyFunctionBase::offsetOfInstance()), jsCalleeAnchor);
-            m_jit.loadPtr(MacroAssembler::Address(calleeLocation.asGPR(), WebAssemblyFunctionBase::offsetOfEntrypointLoadLocation()), calleeCode);
+            Location calleeLocation;
+            if (callee.isConst()) {
+                ASSERT(callee.asI64() == JSValue::encode(jsNull()));
+                // This is going to throw anyway. It's suboptimial but probably won't happen in practice anyway.
+                emitMoveConst(callee, calleeLocation = Location::fromGPR2(otherScratches.gpr(1), otherScratches.gpr(0)));
+            } else
+                calleeLocation = loadIfNecessary(callee);
+            emitThrowOnNullReference(ExceptionType::NullReference, calleeLocation);
+
+            calleePtr = calleeLocation.asGPRlo();
+            calleeInstance = otherScratches.gpr(1);
+            jsCalleeAnchor = otherScratches.gpr(2);
+#endif
+
+            m_jit.loadPtr(MacroAssembler::Address(calleePtr, WebAssemblyFunctionBase::offsetOfInstance()), jsCalleeAnchor);
+            m_jit.loadPtr(MacroAssembler::Address(calleePtr, WebAssemblyFunctionBase::offsetOfEntrypointLoadLocation()), calleeCode);
             m_jit.loadPtr(MacroAssembler::Address(jsCalleeAnchor, JSWebAssemblyInstance::offsetOfInstance()), calleeInstance);
 
         }
@@ -8145,6 +11249,8 @@ public:
     }
 
     // SIMD
+
+#if USE(JSVALUE64)
 
     void notifyFunctionUsesSIMD()
     {
@@ -9324,6 +12430,120 @@ public:
         return { };
     }
 
+#else // USE(JSVALUE64) elif USE(JSVALUE32_64)
+
+    void notifyFunctionUsesSIMD()
+    {
+        m_usesSIMD = false;
+    }
+
+    PartialResult addSIMDLoad(ExpressionType, uint32_t, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDStore(ExpressionType, ExpressionType, uint32_t)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDSplat(SIMDLane, ExpressionType, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDShuffle(v128_t, ExpressionType, ExpressionType, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDShift(SIMDLaneOperation, SIMDInfo, ExpressionType, ExpressionType, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDExtmul(SIMDLaneOperation, SIMDInfo, ExpressionType, ExpressionType, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDLoadSplat(SIMDLaneOperation, ExpressionType, uint32_t, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDLoadLane(SIMDLaneOperation, ExpressionType, ExpressionType, uint32_t, uint8_t, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDStoreLane(SIMDLaneOperation, ExpressionType, ExpressionType, uint32_t, uint8_t)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDLoadExtend(SIMDLaneOperation, ExpressionType, uint32_t, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDLoadPad(SIMDLaneOperation, ExpressionType, uint32_t, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    void materializeVectorConstant(v128_t, Location)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    ExpressionType addConstant(v128_t)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addExtractLane(SIMDInfo, uint8_t, Value, Value&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addReplaceLane(SIMDInfo, uint8_t, ExpressionType, ExpressionType, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDI_V(SIMDLaneOperation, SIMDInfo, ExpressionType, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDV_V(SIMDLaneOperation, SIMDInfo, ExpressionType, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDBitwiseSelect(ExpressionType, ExpressionType, ExpressionType, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDRelOp(SIMDLaneOperation, SIMDInfo, ExpressionType, ExpressionType, B3::Air::Arg, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDV_VV(SIMDLaneOperation, SIMDInfo, ExpressionType, ExpressionType, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+    PartialResult addSIMDRelaxedFMA(SIMDLaneOperation, SIMDInfo, ExpressionType, ExpressionType, ExpressionType, ExpressionType&)
+    {
+        UNREACHABLE_FOR_PLATFORM();
+    }
+
+#endif // USE(JSVALUE32_64)
+
     void dump(const ControlStack&, const Stack*) { }
     void didFinishParsingLocals() { }
     void didPopValueFromStack(ExpressionType, String) { }
@@ -9364,6 +12584,7 @@ private:
         return (loc.isGPR() && loc.asGPR() == wasmScratchGPR) || (loc.isFPR() && loc.asFPR() == wasmScratchFPR);
     }
 
+#if USE(JSVALUE64)
     void emitStoreConst(Value constant, Location loc)
     {
         LOG_INSTRUCTION("Store", constant, RESULT(loc));
@@ -9398,7 +12619,44 @@ private:
             break;
         }
     }
+#else
+    void emitStoreConst(Value constant, Location loc)
+    {
+        LOG_INSTRUCTION("Store", constant, RESULT(loc));
 
+        ASSERT(constant.isConst());
+        ASSERT(loc.isMemory());
+
+        switch (constant.type()) {
+        case TypeKind::I32:
+        case TypeKind::F32:
+            m_jit.store32(Imm32(constant.asI32()), loc.asAddress());
+            break;
+        case TypeKind::Ref:
+        case TypeKind::Funcref:
+        case TypeKind::Arrayref:
+        case TypeKind::Structref:
+        case TypeKind::RefNull:
+        case TypeKind::Externref:
+        case TypeKind::Eqref:
+        case TypeKind::Anyref:
+        case TypeKind::Nullref:
+        case TypeKind::Nullfuncref:
+        case TypeKind::Nullexternref:
+            m_jit.storePair32(TrustedImm32(constant.asI64lo()), TrustedImm32(constant.asI64hi()), loc.asAddress());
+            break;
+        case TypeKind::I64:
+        case TypeKind::F64:
+            m_jit.storePair32(TrustedImm32(constant.asI64lo()), TrustedImm32(constant.asI64hi()), loc.asAddress());
+            break;
+        default:
+            RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("Unimplemented constant typekind.");
+            break;
+        }
+    }
+#endif
+
+#if USE(JSVALUE64)
     void emitMoveConst(Value constant, Location loc)
     {
         ASSERT(constant.isConst());
@@ -9443,7 +12701,59 @@ private:
             break;
         }
     }
+#else
+    void emitMoveConst(Value constant, Location loc)
+    {
+        ASSERT(constant.isConst());
 
+        if (loc.isMemory())
+            return emitStoreConst(constant, loc);
+
+        ASSERT(loc.isRegister());
+        ASSERT(loc.isFPR() == constant.isFloat());
+
+        if (!isScratch(loc))
+            LOG_INSTRUCTION("Move", constant, RESULT(loc));
+
+        switch (constant.type()) {
+        case TypeKind::I32:
+            m_jit.move(Imm32(constant.asI32()), loc.asGPR());
+            break;
+        case TypeKind::I64:
+            m_jit.move(Imm32(constant.asI64hi()), loc.asGPRhi());
+            m_jit.move(Imm32(constant.asI64lo()), loc.asGPRlo());
+            break;
+        case TypeKind::Ref:
+        case TypeKind::Funcref:
+        case TypeKind::Arrayref:
+        case TypeKind::Structref:
+        case TypeKind::RefNull:
+        case TypeKind::Externref:
+        case TypeKind::Eqref:
+        case TypeKind::Anyref:
+        case TypeKind::Nullref:
+        case TypeKind::Nullfuncref:
+        case TypeKind::Nullexternref:
+            m_jit.move(Imm32(constant.asI64hi()), loc.asGPRhi());
+            m_jit.move(Imm32(constant.asI64lo()), loc.asGPRlo());
+            break;
+        case TypeKind::F32:
+            m_jit.move(Imm32(constant.asI32()), wasmScratchGPR);
+            m_jit.move32ToFloat(wasmScratchGPR, loc.asFPR());
+            break;
+        case TypeKind::F64:
+            m_jit.move(Imm32(constant.asI64hi()), wasmScratchGPR2);
+            m_jit.move(Imm32(constant.asI64lo()), wasmScratchGPR);
+            m_jit.move64ToDouble(wasmScratchGPR2, wasmScratchGPR, loc.asFPR());
+            break;
+        default:
+            RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("Unimplemented constant typekind.");
+            break;
+        }
+    }
+#endif
+
+#if USE(JSVALUE64)
     void emitStore(TypeKind type, Location src, Location dst)
     {
         ASSERT(dst.isMemory());
@@ -9483,6 +12793,50 @@ private:
             RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("Unimplemented type kind store.");
         }
     }
+#else
+    void emitStore(TypeKind type, Location src, Location dst)
+    {
+        ASSERT(dst.isMemory());
+        ASSERT(src.isRegister());
+
+        switch (type) {
+        case TypeKind::I32:
+            m_jit.store32(src.asGPR(), dst.asAddress());
+            break;
+        case TypeKind::I31ref:
+            m_jit.store32(src.asGPRlo(), dst.asAddress());
+            m_jit.store32(TrustedImm32(JSValue::Int32Tag), dst.asAddress().withOffset(4));
+            break;
+        case TypeKind::I64:
+            m_jit.storePair32(src.asGPRlo(), src.asGPRhi(), dst.asAddress());
+            break;
+        case TypeKind::F32:
+            m_jit.storeFloat(src.asFPR(), dst.asAddress());
+            break;
+        case TypeKind::F64:
+            m_jit.storeDouble(src.asFPR(), dst.asAddress());
+            break;
+        case TypeKind::Externref:
+        case TypeKind::Ref:
+        case TypeKind::RefNull:
+        case TypeKind::Funcref:
+        case TypeKind::Arrayref:
+        case TypeKind::Structref:
+        case TypeKind::Eqref:
+        case TypeKind::Anyref:
+        case TypeKind::Nullref:
+        case TypeKind::Nullfuncref:
+        case TypeKind::Nullexternref:
+            m_jit.storePair32(src.asGPRlo(), src.asGPRhi(), dst.asAddress());
+            break;
+        case TypeKind::V128:
+            m_jit.storeVector(src.asFPR(), dst.asAddress());
+            break;
+        default:
+            RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("Unimplemented type kind store.");
+        }
+    }
+#endif
 
     void emitStore(Value src, Location dst)
     {
@@ -9493,6 +12847,7 @@ private:
         emitStore(src.type(), locationOf(src), dst);
     }
 
+#if USE(JSVALUE64)
     void emitMoveMemory(TypeKind type, Location src, Location dst)
     {
         ASSERT(dst.isMemory());
@@ -9538,6 +12893,60 @@ private:
             RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("Unimplemented type kind move.");
         }
     }
+#else
+    void emitMoveMemory(TypeKind type, Location src, Location dst)
+    {
+        ASSERT(dst.isMemory());
+        ASSERT(src.isMemory());
+
+        if (src == dst)
+            return;
+
+        switch (type) {
+        case TypeKind::I32:
+            m_jit.transfer32(src.asAddress(), dst.asAddress());
+            break;
+        case TypeKind::I31ref:
+            m_jit.transfer32(src.asAddress(), dst.asAddress());
+            m_jit.store32(TrustedImm32(JSValue::Int32Tag), dst.asAddress().withOffset(4));
+            break;
+        case TypeKind::F32:
+            m_jit.transfer32(src.asAddress(), dst.asAddress());
+            break;
+        case TypeKind::I64:
+            m_jit.transfer32(src.asAddress().withOffset(0), dst.asAddress().withOffset(0));
+            m_jit.transfer32(src.asAddress().withOffset(4), dst.asAddress().withOffset(4));
+            break;
+        case TypeKind::F64:
+            m_jit.loadDouble(src.asAddress(), wasmScratchFPR);
+            m_jit.storeDouble(wasmScratchFPR, dst.asAddress());
+            break;
+        case TypeKind::Externref:
+        case TypeKind::Ref:
+        case TypeKind::RefNull:
+        case TypeKind::Funcref:
+        case TypeKind::Structref:
+        case TypeKind::Arrayref:
+        case TypeKind::Eqref:
+        case TypeKind::Anyref:
+        case TypeKind::Nullref:
+        case TypeKind::Nullfuncref:
+        case TypeKind::Nullexternref:
+            m_jit.transfer32(src.asAddress().withOffset(0), dst.asAddress().withOffset(0));
+            m_jit.transfer32(src.asAddress().withOffset(4), dst.asAddress().withOffset(4));
+            break;
+        case TypeKind::V128: {
+            Address srcAddress = src.asAddress();
+            Address dstAddress = dst.asAddress();
+            m_jit.loadVector(srcAddress, wasmScratchFPR);
+            m_jit.storeVector(wasmScratchFPR, dstAddress);
+            break;
+        }
+        default:
+            RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("Unimplemented type kind move.");
+        }
+    }
+#endif
 
     void emitMoveMemory(Value src, Location dst)
     {
@@ -9545,6 +12954,7 @@ private:
         emitMoveMemory(src.type(), locationOf(src), dst);
     }
 
+#if USE(JSVALUE64)
     void emitMoveRegister(TypeKind type, Location src, Location dst)
     {
         ASSERT(dst.isRegister());
@@ -9581,6 +12991,48 @@ private:
             RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("Unimplemented type kind move.");
         }
     }
+#else
+    void emitMoveRegister(TypeKind type, Location src, Location dst)
+    {
+        ASSERT(dst.isRegister());
+        ASSERT(src.isRegister());
+
+        if (src == dst)
+            return;
+
+        switch (type) {
+        case TypeKind::I32:
+            m_jit.move(src.asGPR(), dst.asGPR());
+            break;
+        case TypeKind::I31ref:
+        case TypeKind::I64:
+        case TypeKind::Externref:
+        case TypeKind::Ref:
+        case TypeKind::RefNull:
+        case TypeKind::Funcref:
+        case TypeKind::Arrayref:
+        case TypeKind::Structref:
+        case TypeKind::Eqref:
+        case TypeKind::Anyref:
+        case TypeKind::Nullref:
+        case TypeKind::Nullfuncref:
+        case TypeKind::Nullexternref:
+            ASSERT(dst.asGPRlo() != src.asGPRhi());
+            m_jit.move(src.asGPRlo(), dst.asGPRlo());
+            m_jit.move(src.asGPRhi(), dst.asGPRhi());
+            break;
+        case TypeKind::F32:
+        case TypeKind::F64:
+            m_jit.moveDouble(src.asFPR(), dst.asFPR());
+            break;
+        case TypeKind::V128:
+            m_jit.moveVector(src.asFPR(), dst.asFPR());
+            break;
+        default:
+            RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("Unimplemented type kind move.");
+        }
+    }
+#endif
 
     void emitMoveRegister(Value src, Location dst)
     {
@@ -9590,6 +13042,7 @@ private:
         emitMoveRegister(src.type(), locationOf(src), dst);
     }
 
+#if USE(JSVALUE64)
     void emitLoad(TypeKind type, Location src, Location dst)
     {
         ASSERT(dst.isRegister());
@@ -9629,6 +13082,47 @@ private:
             RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("Unimplemented type kind load.");
         }
     }
+#else
+    void emitLoad(TypeKind type, Location src, Location dst)
+    {
+        ASSERT(dst.isRegister());
+        ASSERT(src.isMemory());
+
+        switch (type) {
+        case TypeKind::I32:
+            m_jit.load32(src.asAddress(), dst.asGPR());
+            break;
+        case TypeKind::I31ref:
+        case TypeKind::I64:
+            m_jit.loadPair32(src.asAddress(), dst.asGPRlo(), dst.asGPRhi());
+            break;
+        case TypeKind::F32:
+            m_jit.loadFloat(src.asAddress(), dst.asFPR());
+            break;
+        case TypeKind::F64:
+            m_jit.loadDouble(src.asAddress(), dst.asFPR());
+            break;
+        case TypeKind::Ref:
+        case TypeKind::RefNull:
+        case TypeKind::Externref:
+        case TypeKind::Funcref:
+        case TypeKind::Arrayref:
+        case TypeKind::Structref:
+        case TypeKind::Eqref:
+        case TypeKind::Anyref:
+        case TypeKind::Nullref:
+        case TypeKind::Nullfuncref:
+        case TypeKind::Nullexternref:
+            m_jit.loadPair32(src.asAddress(), dst.asGPRlo(), dst.asGPRhi());
+            break;
+        case TypeKind::V128:
+            m_jit.loadVector(src.asAddress(), dst.asFPR());
+            break;
+        default:
+            RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("Unimplemented type kind load.");
+        }
+    }
+#endif
 
     void emitLoad(Value src, Location dst)
     {
@@ -9672,6 +13166,7 @@ private:
         Moved
     };
 
+#if USE(JSVALUE64)
     template<size_t N, typename OverflowHandler>
     void emitShuffleMove(Vector<Value, N, OverflowHandler>& srcVector, Vector<Location, N, OverflowHandler>& dstVector, Vector<ShuffleStatus, N, OverflowHandler>& statusVector, unsigned index)
     {
@@ -9703,6 +13198,59 @@ private:
         emitMove(srcVector[index], dst);
         statusVector[index] = ShuffleStatus::Moved;
     }
+#else
+    template<size_t N, typename OverflowHandler>
+    void emitShuffleMove(Vector<Value, N, OverflowHandler>& srcVector, Vector<Location, N, OverflowHandler>& dstVector, Vector<ShuffleStatus, N, OverflowHandler>& statusVector, unsigned index)
+    {
+        Location srcLocation = locationOf(srcVector[index]);
+        Location dst = dstVector[index];
+        if (srcLocation == dst)
+            return; // Easily eliminate redundant moves here.
+
+        statusVector[index] = ShuffleStatus::BeingMoved;
+        for (unsigned i = 0; i < srcVector.size(); i ++) {
+            // This check should handle constants too - constants always have location None, and no
+            // dst should ever be a constant. But we assume that's asserted in the caller.
+            auto aliasesDst = [&] (Location loc) -> bool {
+                if (loc.isGPR()) {
+                    if (dst.isGPR2())
+                        return loc.asGPR() == dst.asGPRhi() || loc.asGPR() == dst.asGPRlo();
+                } else if (loc.isGPR2()) {
+                    if (dst.isGPR())
+                        return loc.asGPRhi() == dst.asGPR() || loc.asGPRlo() == dst.asGPR();
+                    if (dst.isGPR2()) {
+                        return loc.asGPRhi() == dst.asGPRhi() || loc.asGPRhi() == dst.asGPRlo()
+                            || loc.asGPRlo() == dst.asGPRhi() || loc.asGPRlo() == dst.asGPRlo();
+                    }
+                }
+                return loc == dst;
+            };
+            if (aliasesDst(locationOf(srcVector[i]))) {
+                switch (statusVector[i]) {
+                case ShuffleStatus::ToMove:
+                    emitShuffleMove(srcVector, dstVector, statusVector, i);
+                    break;
+                case ShuffleStatus::BeingMoved: {
+                    Location temp;
+                    if (srcVector[i].isFloat())
+                        temp = Location::fromFPR(wasmScratchFPR);
+                    else if (typeNeedsGPR2(srcVector[i].type()))
+                        temp = Location::fromGPR2(wasmScratchGPR2, wasmScratchGPR);
+                    else
+                        temp = Location::fromGPR(wasmScratchGPR);
+                    emitMove(srcVector[i], temp);
+                    srcVector[i] = Value::pinned(srcVector[i].type(), temp);
+                    break;
+                }
+                case ShuffleStatus::Moved:
+                    break;
+                }
+            }
+        }
+        emitMove(srcVector[index], dst);
+        statusVector[index] = ShuffleStatus::Moved;
+    }
+#endif
 
     template<size_t N, typename OverflowHandler>
     void emitShuffle(Vector<Value, N, OverflowHandler>& srcVector, Vector<Location, N, OverflowHandler>& dstVector)
@@ -9728,6 +13276,7 @@ private:
         return m_parser->controlStack().last().controlData;
     }
 
+#if USE(JSVALUE64)
     void setLRUKey(Location location, LocalOrTempIndex key)
     {
         if (location.isGPR())
@@ -9735,6 +13284,19 @@ private:
         else if (location.isFPR())
             m_fprLRU.increaseKey(location.asFPR(), key);
     }
+#else
+    void setLRUKey(Location location, LocalOrTempIndex key)
+    {
+        if (location.isGPR()) {
+            m_gprLRU.increaseKey(location.asGPR(), key);
+        } else if (location.isFPR()) {
+            m_fprLRU.increaseKey(location.asFPR(), key);
+        } else if (location.isGPR2()) {
+            m_gprLRU.increaseKey(location.asGPRhi(), key);
+            m_gprLRU.increaseKey(location.asGPRlo(), key);
+        }
+    }
+#endif
 
     void increaseKey(Location location)
     {
@@ -9774,6 +13336,10 @@ private:
         if (reg.kind() == Location::None
             || value.isFloat() != reg.isFPR()
             || (reg.isGPR() && !m_gprSet.contains(reg.asGPR(), IgnoreVectors))
+#if USE(JSVALUE32_64)
+            || (reg.isGPR2() && !typeNeedsGPR2(value.type()))
+            || (reg.isGPR() && typeNeedsGPR2(value.type()))
+#endif
             || (reg.isFPR() && !m_fprSet.contains(reg.asFPR(), Width::Width128)))
             reg = allocateRegister(value);
         increaseKey(reg);
@@ -9842,12 +13408,49 @@ private:
             unbind(value, location);
     }
 
+#if USE(JSVALUE64)
     Location allocateRegister(TypeKind type)
     {
         if (isFloatingPointType(type))
             return Location::fromFPR(m_fprSet.isEmpty() ? evictFPR() : nextFPR());
         return Location::fromGPR(m_gprSet.isEmpty() ? evictGPR() : nextGPR());
     }
+
+#else
+    Location allocateRegister(TypeKind type)
+    {
+        if (isFloatingPointType(type))
+            return Location::fromFPR(m_fprSet.isEmpty() ? evictFPR() : nextFPR());
+        if (typeNeedsGPR2(type)) {
+            GPRReg hi, lo;
+
+            do {
+                // we loop here until we can get _two_ register from m_gprSet
+                // this wouldn't be necessary except that evictGPR modifies m_gprSet and nextGPR _doesn't_
+
+                if (m_gprSet.isEmpty()) {
+                    evictGPR();
+                    continue;
+                }
+
+                auto iter = m_gprSet.begin();
+                ASSERT(iter != m_gprSet.end());
+                hi = (*iter).gpr();
+                ++iter;
+                if (iter == m_gprSet.end()) {
+                    m_gprLRU.lock(hi);
+                    evictGPR();
+                    m_gprLRU.unlock(hi);
+                    continue;
+                }
+                lo = (*iter).gpr();
+
+                return Location::fromGPR2(hi, lo);
+            } while (1);
+        }
+        return Location::fromGPR(m_gprSet.isEmpty() ? evictGPR() : nextGPR());
+    }
+#endif
 
     Location allocateRegister(Value value)
     {
@@ -9875,6 +13478,18 @@ private:
                 ASSERT(m_fprSet.contains(loc.asFPR(), Width::Width128));
                 m_fprSet.remove(loc.asFPR());
                 m_fprBindings[loc.asFPR()] = RegisterBinding::fromValue(value);
+#if USE(JSVALUE32_64)
+            } else if (loc.isGPR2()) {
+                ASSERT(m_gprBindings[loc.asGPRlo()].isNone());
+                ASSERT(m_gprBindings[loc.asGPRhi()].isNone());
+                ASSERT(m_gprSet.contains(loc.asGPRlo(), IgnoreVectors));
+                ASSERT(m_gprSet.contains(loc.asGPRhi(), IgnoreVectors));
+                m_gprSet.remove(loc.asGPRlo());
+                m_gprSet.remove(loc.asGPRhi());
+                auto binding = RegisterBinding::fromValue(value);
+                m_gprBindings[loc.asGPRlo()] = binding;
+                m_gprBindings[loc.asGPRhi()] = binding;
+#endif
             } else {
                 ASSERT(m_gprSet.contains(loc.asGPR(), IgnoreVectors));
                 m_gprSet.remove(loc.asGPR());
@@ -9907,6 +13522,13 @@ private:
             ASSERT(m_validGPRs.contains(loc.asGPR(), IgnoreVectors));
             m_gprSet.add(loc.asGPR(), IgnoreVectors);
             m_gprBindings[loc.asGPR()] = RegisterBinding::none();
+#if USE(JSVALUE32_64)
+        } else if (loc.isGPR2()) {
+            m_gprSet.add(loc.asGPRlo(), IgnoreVectors);
+            m_gprSet.add(loc.asGPRhi(), IgnoreVectors);
+            m_gprBindings[loc.asGPRlo()] = RegisterBinding::none();
+            m_gprBindings[loc.asGPRhi()] = RegisterBinding::none();
+#endif
         }
         if (value.isLocal())
             m_locals[value.asLocal()] = m_localSlots[value.asLocal()];
@@ -10076,7 +13698,11 @@ private:
                     bindFPRToScratch(reg.fpr());
             }
             for (int i = 0; i < GPRs; i ++)
+#if CPU(X86_64) || CPU(ARM64)
                 m_tempGPRs[i] = bindGPRToScratch(m_generator.allocateRegister(TypeKind::I64).asGPR());
+#else
+                m_tempGPRs[i] = bindGPRToScratch(m_generator.allocateRegister(TypeKind::I32).asGPR());
+#endif
             for (int i = 0; i < FPRs; i ++)
                 m_tempFPRs[i] = bindFPRToScratch(m_generator.allocateRegister(TypeKind::F64).asFPR());
         }
@@ -10208,6 +13834,12 @@ private:
                 m_preserved.add(location.asGPR(), IgnoreVectors);
             else if (location.isFPR())
                 m_preserved.add(location.asFPR(), Width::Width128);
+#if USE(JSVALUE32_64)
+            else if (location.isGPR2()) {
+                m_preserved.add(location.asGPRlo(), IgnoreVectors);
+                m_preserved.add(location.asGPRhi(), IgnoreVectors);
+            }
+#endif
             initializedPreservedSet(args...);
         }
 
