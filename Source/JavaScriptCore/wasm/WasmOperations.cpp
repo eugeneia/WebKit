@@ -1018,7 +1018,8 @@ JSC_DEFINE_JIT_OPERATION(operationWasmRetrieveAndClearExceptionIfCatchable, Thro
     return { JSValue::encode(thrownValue), jumpTarget };
 }
 #else
-static ThrownExceptionInfo retrieveAndClearExceptionIfCatchableNonSharedImpl(Instance* instance)
+// Same as JSVALUE64 version, but returns thrownValue on stack
+JSC_DEFINE_JIT_OPERATION(operationWasmRetrieveAndClearExceptionIfCatchable, void*, (Instance* instance, EncodedJSValue* thrownValue))
 {
     VM& vm = instance->vm();
     auto throwScope = DECLARE_THROW_SCOPE(vm);
@@ -1026,28 +1027,17 @@ static ThrownExceptionInfo retrieveAndClearExceptionIfCatchableNonSharedImpl(Ins
     RELEASE_ASSERT(!!throwScope.exception());
 
     vm.callFrameForCatch = nullptr;
-    vm.targetMachinePCForThrow = nullptr;
+    auto* jumpTarget = std::exchange(vm.targetMachinePCAfterCatch, nullptr);
 
     Exception* exception = throwScope.exception();
-    JSValue thrownValue = exception->value();
+    *thrownValue = JSValue::encode(exception->value());
 
     // We want to clear the exception here rather than in the catch prologue
     // JIT code because clearing it also entails clearing a bit in an Atomic
     // bit field in VMTraps.
     throwScope.clearException();
 
-    void* payload = nullptr;
-    if (JSWebAssemblyException* wasmException = jsDynamicCast<JSWebAssemblyException*>(thrownValue))
-        payload = bitwise_cast<void*>(wasmException->payload().data());
-
-    return { JSValue::encode(thrownValue), payload };
-}
-
-JSC_DEFINE_JIT_OPERATION(operationWasmRetrieveAndClearExceptionIfCatchable32, void*, (Instance* instance, EncodedJSValue* encodedThrownValue))
-{
-    auto info = retrieveAndClearExceptionIfCatchableNonSharedImpl(instance);
-    *encodedThrownValue = info.thrownValue;
-    return info.payload;
+    return jumpTarget;
 }
 #endif // USE(JSVALUE64)
 
