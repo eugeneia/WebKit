@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,51 +27,53 @@
 
 #if ENABLE(WEBASSEMBLY_OMGJIT) || ENABLE(WEBASSEMBLY_BBQJIT)
 
-#include "B3Type.h"
-#include "B3ValueRep.h"
-#include <wtf/FixedVector.h>
+#include "B3Common.h"
+#include "B3Procedure.h"
+#include "CCallHelpers.h"
+#include "JITCompilation.h"
+#include "JITOpaqueByproducts.h"
+#include "PCToCodeOriginMap.h"
+#include "WasmBBQDisassembler.h"
+#include "WasmCompilationMode.h"
+#include "WasmJS.h"
+#include "WasmMemory.h"
+#include "WasmModuleInformation.h"
+#include "WasmTierUpCount.h"
+#include <wtf/Box.h>
+#include <wtf/Expected.h>
 
-namespace JSC { namespace Wasm {
+namespace JSC {
 
-class OSREntryValue final : public B3::ValueRep {
-public:
-    OSREntryValue() = default;
-    OSREntryValue(const B3::ValueRep& valueRep, B3::Type type)
-        : B3::ValueRep(valueRep)
-        , m_type(type)
-    {
-    }
+#if !ENABLE(B3_JIT)
+namespace B3 {
 
-    B3::Type type() const { return m_type; }
+class Procedure { };
 
-private:
-    B3::Type m_type { };
+}
+#endif
+
+namespace Wasm {
+
+class BBQDisassembler;
+class MemoryInformation;
+class OptimizingJITCallee;
+class TierUpCount;
+
+struct CompilationContext {
+    std::unique_ptr<CCallHelpers> jsEntrypointJIT;
+    std::unique_ptr<CCallHelpers> wasmEntrypointJIT;
+    std::unique_ptr<OpaqueByproducts> wasmEntrypointByproducts;
+    std::unique_ptr<B3::Procedure> procedure;
+    std::unique_ptr<BBQDisassembler> bbqDisassembler;
+    Box<PCToCodeOriginMap> pcToCodeOriginMap;
+    Box<PCToCodeOriginMapBuilder> pcToCodeOriginMapBuilder;
+    Vector<CCallHelpers::Label> catchEntrypoints;
 };
 
-using StackMap = FixedVector<OSREntryValue>;
-using StackMaps = HashMap<CallSiteIndex, StackMap>;
+void computePCToCodeOriginMap(CompilationContext&, LinkBuffer&);
 
-class OSREntryData {
-    WTF_MAKE_NONCOPYABLE(OSREntryData);
-    WTF_MAKE_FAST_ALLOCATED;
-public:
-    OSREntryData(uint32_t functionIndex, uint32_t loopIndex, StackMap&& stackMap)
-        : m_functionIndex(functionIndex)
-        , m_loopIndex(loopIndex)
-        , m_values(WTFMove(stackMap))
-    {
-    }
+} // namespace Wasm
 
-    uint32_t functionIndex() const { return m_functionIndex; }
-    uint32_t loopIndex() const { return m_loopIndex; }
-    const StackMap& values() { return m_values; }
+} // namespace JSC
 
-private:
-    uint32_t m_functionIndex;
-    uint32_t m_loopIndex;
-    StackMap m_values;
-};
-
-} } // namespace JSC::Wasm
-
-#endif // ENABLE(WEBASSEMBLY_OMGJIT)
+#endif // ENABLE(WEBASSEMBLY_OMGJIT) || ENABLE(WEBASSEMBLY_BBQJIT)

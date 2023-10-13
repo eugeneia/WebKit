@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2023 Apple Inc. All rights reserved.
+ * Copyright (C) 2016-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,18 +23,29 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#pragma once
-
-#if ENABLE(WEBASSEMBLY_BBQJIT)
-
+#include "config.h"
 #include "WasmCompilationContext.h"
 
-namespace JSC { namespace Wasm {
 
-class BBQCallee;
+#if ENABLE(WEBASSEMBLY_BBQJIT) || ENABLE(WEBASSEMBLY_OMGJIT)
+namespace JSC {
 
-Expected<std::unique_ptr<InternalFunction>, String> parseAndCompileBBQ(CompilationContext&, BBQCallee&, const FunctionData&, const TypeDefinition&, Vector<UnlinkedWasmToWasmCall>&, const ModuleInformation&, MemoryMode, uint32_t functionIndex, std::optional<bool> hasExceptionHandlers, unsigned, TierUpCount* = nullptr);
+namespace Wasm {
 
-} } // namespace JSC::Wasm
+void computePCToCodeOriginMap(CompilationContext& context, LinkBuffer& linkBuffer)
+{
+    if (context.procedure && context.procedure->needsPCToOriginMap()) {
+        B3::PCToOriginMap originMap = context.procedure->releasePCToOriginMap();
+        context.pcToCodeOriginMap = Box<PCToCodeOriginMap>::create(PCToCodeOriginMapBuilder(PCToCodeOriginMapBuilder::WasmCodeOriginMap, WTFMove(originMap)), linkBuffer);
+        return;
+    }
+    if (context.pcToCodeOriginMapBuilder) {
+        context.pcToCodeOriginMap = Box<PCToCodeOriginMap>::create(WTFMove(*context.pcToCodeOriginMapBuilder), linkBuffer);
+        return;
+    }
+}
 
-#endif // ENABLE(WEBASSEMBLY_OMGJIT)
+} // namespace Wasm
+} // namespace JSC
+
+#endif

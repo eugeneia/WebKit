@@ -271,6 +271,47 @@ inline bool shouldJIT(unsigned functionIndex)
     return true;
 }
 
+JSC_DEFINE_JIT_OPERATION(operationWasmTriggerTierUpNow, void, (Instance* instance, uint32_t functionIndex))
+{
+    Wasm::CalleeGroup& calleeGroup = *instance->calleeGroup();
+    ASSERT(instance->memory()->mode() == calleeGroup.mode());
+
+    uint32_t functionIndexInSpace = functionIndex + calleeGroup.functionImportCount();
+    ASSERT(calleeGroup.wasmBBQCalleeFromFunctionIndexSpace(functionIndexInSpace).compilationMode() == Wasm::CompilationMode::BBQMode);
+    BBQCallee& callee = static_cast<BBQCallee&>(calleeGroup.wasmBBQCalleeFromFunctionIndexSpace(functionIndexInSpace));
+    TierUpCount& tierUp = *callee.tierUpCount();
+
+    if (!shouldJIT(functionIndex)) {
+        tierUp.deferIndefinitely();
+        return;
+    }
+
+    dataLogLnIf(Options::verboseOSR(), "Consider OMGPlan for [", functionIndex, "] with executeCounter = ", tierUp, " ", RawPointer(callee.replacement()));
+
+    if (shouldTriggerOMGCompile(tierUp, callee.replacement(), functionIndex))
+        triggerOMGReplacementCompile(tierUp, callee.replacement(), instance, calleeGroup, functionIndex, callee.hasExceptionHandlers());
+
+    // We already have an OMG replacement.
+    if (callee.replacement()) {
+        // No OSR entry points. Just defer indefinitely.
+        if (tierUp.osrEntryTriggers().isEmpty()) {
+            dataLogLnIf(Options::verboseOSR(), "delayOMGCompile replacement in place, delaying indefinitely for ", functionIndex);
+            tierUp.dontOptimizeAnytimeSoon(functionIndex);
+            return;
+        }
+
+        // Found one OSR entry point. Since we do not have a way to jettison Wasm::Callee right now, this means that tierUp function is now meaningless.
+        // Not call it as much as possible.
+        if (callee.osrEntryCallee()) {
+            dataLogLnIf(Options::verboseOSR(), "delayOMGCompile trigger in place, delaying indefinitely for ", functionIndex);
+            tierUp.dontOptimizeAnytimeSoon(functionIndex);
+            return;
+        }
+    }
+}
+#endif
+
+#if ENABLE(WEBASSEMBLY_OMGJIT)
 JSC_DEFINE_JIT_OPERATION(operationWasmTriggerOSREntryNow, void, (Probe::Context& context))
 {
     OSREntryData& osrEntryData = *context.arg<OSREntryData*>();
@@ -459,6 +500,9 @@ JSC_DEFINE_JIT_OPERATION(operationWasmTriggerOSREntryNow, void, (Probe::Context&
     return returnWithoutOSREntry();
 }
 
+#endif
+#if ENABLE(WEBASSEMBLY_OMGJIT) || ENABLE(WEBASSEMBLY_BBQJIT)
+
 JSC_DEFINE_JIT_OPERATION(operationWasmLoopOSREnterBBQJIT, void, (Probe::Context& context))
 {
     TierUpCount& tierUp = *context.arg<TierUpCount*>();
@@ -513,44 +557,6 @@ JSC_DEFINE_JIT_OPERATION(operationWasmLoopOSREnterBBQJIT, void, (Probe::Context&
     context.gpr(GPRInfo::nonPreservedNonArgumentGPR0) = bitwise_cast<UCPURegister>(callee.loopEntrypoints()[loopIndex].taggedPtr());
 }
 
-JSC_DEFINE_JIT_OPERATION(operationWasmTriggerTierUpNow, void, (Instance* instance, uint32_t functionIndex))
-{
-    Wasm::CalleeGroup& calleeGroup = *instance->calleeGroup();
-    ASSERT(instance->memory()->mode() == calleeGroup.mode());
-
-    uint32_t functionIndexInSpace = functionIndex + calleeGroup.functionImportCount();
-    ASSERT(calleeGroup.wasmBBQCalleeFromFunctionIndexSpace(functionIndexInSpace).compilationMode() == Wasm::CompilationMode::BBQMode);
-    BBQCallee& callee = static_cast<BBQCallee&>(calleeGroup.wasmBBQCalleeFromFunctionIndexSpace(functionIndexInSpace));
-    TierUpCount& tierUp = *callee.tierUpCount();
-
-    if (!shouldJIT(functionIndex)) {
-        tierUp.deferIndefinitely();
-        return;
-    }
-
-    dataLogLnIf(Options::verboseOSR(), "Consider OMGPlan for [", functionIndex, "] with executeCounter = ", tierUp, " ", RawPointer(callee.replacement()));
-
-    if (shouldTriggerOMGCompile(tierUp, callee.replacement(), functionIndex))
-        triggerOMGReplacementCompile(tierUp, callee.replacement(), instance, calleeGroup, functionIndex, callee.hasExceptionHandlers());
-
-    // We already have an OMG replacement.
-    if (callee.replacement()) {
-        // No OSR entry points. Just defer indefinitely.
-        if (tierUp.osrEntryTriggers().isEmpty()) {
-            dataLogLnIf(Options::verboseOSR(), "delayOMGCompile replacement in place, delaying indefinitely for ", functionIndex);
-            tierUp.dontOptimizeAnytimeSoon(functionIndex);
-            return;
-        }
-
-        // Found one OSR entry point. Since we do not have a way to jettison Wasm::Callee right now, this means that tierUp function is now meaningless.
-        // Not call it as much as possible.
-        if (callee.osrEntryCallee()) {
-            dataLogLnIf(Options::verboseOSR(), "delayOMGCompile trigger in place, delaying indefinitely for ", functionIndex);
-            tierUp.dontOptimizeAnytimeSoon(functionIndex);
-            return;
-        }
-    }
-}
 #endif
 
 JSC_DEFINE_JIT_OPERATION(operationWasmUnwind, void*, (Instance* instance))
