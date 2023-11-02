@@ -1132,7 +1132,6 @@ macro wasmAtomicCompareExchangeOps(lowerCaseOpcode, upperCaseOpcode, fnb, fnh, f
         mloadq(ctx, m_value, t2)
         emitCheckAndPreparePointerAddingOffset(ctx, t3, t1, 1)
         fnb(t0, t2, [t3], t5, t1)
-        andq 0xff, t0 # FIXME: ZeroExtend8To64
         assert(macro(ok) bqbeq t0, 0xff, .ok end)
         returnq(ctx, t0)
     end)
@@ -1143,7 +1142,6 @@ macro wasmAtomicCompareExchangeOps(lowerCaseOpcode, upperCaseOpcode, fnb, fnh, f
         mloadq(ctx, m_value, t2)
         emitCheckAndPreparePointerAddingOffsetWithAlignmentCheck(ctx, t3, t1, 2)
         fnh(t0, t2, [t3], t5, t1)
-        andq 0xffff, t0 # FIXME: ZeroExtend16To64
         assert(macro(ok) bqbeq t0, 0xffff, .ok end)
         returnq(ctx, t0)
     end)
@@ -1172,12 +1170,10 @@ if X86_64 or ARM64E or ARM64 or RISCV64
 # t0GPR => expected, t2GPR => value, mem => memory reference
 wasmAtomicCompareExchangeOps(_cmpxchg, Cmpxchg,
     macro(t0GPR, t2GPR, mem, t5GPR, t1GPR)
+        andq 0xff, t0GPR
         if X86_64 or ARM64E
-            bqa t0GPR , 0xff, .fail
             atomicweakcasb t0GPR, t2GPR, mem
             jmp .done
-        .fail:
-            atomicloadb mem, t0GPR
         .done:
         else
         .loop:
@@ -1195,12 +1191,10 @@ wasmAtomicCompareExchangeOps(_cmpxchg, Cmpxchg,
         end
     end,
     macro(t0GPR, t2GPR, mem, t5GPR, t1GPR)
+        andq 0xffff, t0GPR
         if X86_64 or ARM64E
-            bqa t0GPR, 0xffff, .fail
             atomicweakcash t0GPR, t2GPR, mem
             jmp .done
-        .fail:
-            atomicloadh mem, t0GPR
         .done:
         else
         .loop:
@@ -1218,12 +1212,10 @@ wasmAtomicCompareExchangeOps(_cmpxchg, Cmpxchg,
         end
     end,
     macro(t0GPR, t2GPR, mem, t5GPR, t1GPR)
+        andq 0xffffffff, t0GPR
         if X86_64 or ARM64E
-            bqa t0GPR, 0xffffffff, .fail
             atomicweakcasi t0GPR, t2GPR, mem
             jmp .done
-        .fail:
-            atomicloadi mem, t0GPR
         .done:
         else
         .loop:
