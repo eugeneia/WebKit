@@ -48,6 +48,10 @@
 #include <wtf/NeverDestroyed.h>
 #include <wtf/TZoneMallocInlines.h>
 
+#if ENABLE(OIPF_VK)
+#include "VkConsts.h"
+#endif
+
 namespace WebCore {
 
 WTF_MAKE_TZONE_OR_ISO_ALLOCATED_IMPL(DOMWindow);
@@ -526,6 +530,16 @@ void DOMWindow::blur()
     }
     RELEASE_ASSERT_NOT_REACHED();
 }
+
+#if ENABLE(OIPF_VK)
+ExceptionOr<RefPtr<VkConsts>> DOMWindow::keyEvent()
+{
+    auto* localThis = dynamicDowncast<LocalDOMWindow>(*this);
+    if (!localThis)
+        return Exception { ExceptionCode::SecurityError };
+    return localThis->keyEvent();
+}
+#endif
 
 ExceptionOr<void> DOMWindow::print()
 {
