@@ -6041,7 +6041,7 @@ namespace BBQJITImpl {
     ScratchScope<0, 0> scratches(*this, clobbersForDivX86())
 
     template<typename IntType, bool IsMod>
-    void BBQJIT::emitModOrDiv(const Value& lhs, Location lhsLocation, const Value& rhs, Location rhsLocation, const Value&, Location resultLocation)
+    void BBQJIT::emitModOrDiv(Value& lhs, Location lhsLocation, Value& rhs, Location rhsLocation, Value&, Location resultLocation)
     {
         // FIXME: We currently don't do nearly as sophisticated instruction selection on Intel as we do on other platforms,
         // but there's no good reason we can't. We should probably port over the isel in the future if it seems to yield
@@ -6126,7 +6126,7 @@ namespace BBQJITImpl {
 #define PREPARE_FOR_MOD_OR_DIV
 
     template<typename IntType, bool IsMod>
-    void BBQJIT::emitModOrDiv(const Value& lhs, Location lhsLocation, const Value& rhs, Location rhsLocation, const Value&, Location resultLocation)
+    void BBQJIT::emitModOrDiv(Value& lhs, Location lhsLocation, Value& rhs, Location rhsLocation, Value&, Location resultLocation)
     {
         constexpr bool isSigned = std::is_signed<IntType>();
         constexpr bool is32 = sizeof(IntType) == 4;

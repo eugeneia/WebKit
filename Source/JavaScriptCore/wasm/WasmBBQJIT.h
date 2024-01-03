@@ -1113,13 +1113,8 @@ public:
 
     void emitThrowOnNullReference(ExceptionType type, Location ref);
 
-#if USE(JSVALUE64)
     template<typename IntType, bool IsMod>
-    void emitModOrDiv(const Value& lhs, Location lhsLocation, const Value& rhs, Location rhsLocation, const Value&, Location resultLocation);
-#else
-    template<typename IntType, bool IsMod>
-    void emitModOrDiv(Value& lhs, Location lhsLocation, Value& rhs, Location rhsLocation, Value& result, Location);
-#endif
+    void emitModOrDiv(Value& lhs, Location lhsLocation, Value& rhs, Location rhsLocation, Value& result, Location resultLocation);
 
     template<typename IntType>
     Value checkConstantDivision(const Value& lhs, const Value& rhs);
@@ -1168,6 +1163,7 @@ public:
     PartialResult WARN_UNUSED_RETURN addI32Xor(Value lhs, Value rhs, Value& result);
 
     PartialResult WARN_UNUSED_RETURN addI64Xor(Value lhs, Value rhs, Value& result);
+
 
     PartialResult WARN_UNUSED_RETURN addI32Or(Value lhs, Value rhs, Value& result);
 
