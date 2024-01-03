@@ -71,6 +71,9 @@ namespace JSC { namespace Wasm {
 
 namespace BBQJITImpl {
 
+#define SHARED 1
+
+#if SHARED
         Location Location::none()
         {
             return Location();
@@ -99,6 +102,7 @@ namespace BBQJITImpl {
             loc.m_gpr = gpr;
             return loc;
         }
+#endif
 
 #if USE(JSVALUE32_64)
         Location Location::fromGPR2(GPRReg hi, GPRReg lo)
@@ -121,6 +125,7 @@ namespace BBQJITImpl {
         }
 #endif
 
+#if SHARED
         Location Location::fromFPR(FPRReg fpr)
         {
             Location loc;
@@ -136,6 +141,7 @@ namespace BBQJITImpl {
             loc.m_offset = globalOffset;
             return loc;
         }
+#endif
 
         Location Location::fromArgumentLocation(ArgumentLocation argLocation, TypeKind type)
         {
@@ -159,6 +165,7 @@ namespace BBQJITImpl {
             RELEASE_ASSERT_NOT_REACHED();
         }
 
+#if SHARED
         bool Location::isNone() const
         {
             return m_kind == None;
@@ -168,6 +175,7 @@ namespace BBQJITImpl {
         {
             return m_kind == Gpr;
         }
+#endif
 
 #if USE(JSVALUE32_64)
         bool Location::isGPR2() const
@@ -176,10 +184,12 @@ namespace BBQJITImpl {
         }
 #endif
 
+#if SHARED
         bool Location::isFPR() const
         {
             return m_kind == Fpr;
         }
+#endif
 
 #if USE(JSVALUE64)
         bool Location::isRegister() const
@@ -193,6 +203,7 @@ namespace BBQJITImpl {
         }
 #endif
 
+#if SHARED
         bool Location::isStack() const
         {
             return m_kind == Stack;
@@ -274,6 +285,7 @@ namespace BBQJITImpl {
             ASSERT(isFPR());
             return m_fpr;
         }
+#endif
 
 #if USE(JSVALUE32_64)
         GPRReg Location::asGPRlo() const
@@ -347,6 +359,7 @@ namespace BBQJITImpl {
             return Kind(m_kind);
         }
 
+#if SHARED
     bool BBQJIT::isValidValueTypeKind(TypeKind kind)
     {
         switch (kind) {
@@ -367,6 +380,7 @@ namespace BBQJITImpl {
     {
         return type == TypeKind::F32 || type == TypeKind::F64 || type == TypeKind::V128;
     }
+#endif
 
 #if USE(JSVALUE32_64)
     bool BBQJIT::typeNeedsGPR2(TypeKind type)
@@ -449,6 +463,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     TypeKind BBQJIT::toValueKind(TypeKind kind)
     {
         switch (kind) {
@@ -514,6 +529,7 @@ namespace BBQJITImpl {
             ASSERT(m_kind == Const);
             return m_i32;
         }
+#endif
 
 #if USE(JSVALUE32_64)
         ALWAYS_INLINE int32_t Value::asI64hi() const
@@ -529,6 +545,7 @@ namespace BBQJITImpl {
         }
 #endif
 
+#if SHARED
         ALWAYS_INLINE int64_t Value::asI64() const
         {
             ASSERT(m_kind == Const);
@@ -806,6 +823,7 @@ namespace BBQJITImpl {
             for (unsigned i = 0; i < functionSignature->returnCount(); ++i)
                 m_resultLocations.append(allocateArgumentOrResult(generator, functionSignature->returnType(i).kind, i, gprSetCopy, fprSetCopy));
         }
+#endif
 
         // This function is intentionally not using implicitSlots since arguments and results should not include implicit slot.
 #if USE(JSVALUE64)
@@ -865,6 +883,7 @@ namespace BBQJITImpl {
         }
 #endif
 
+#if SHARED
         void ControlData::convertIfToBlock()
         {
             ASSERT(m_blockType == BlockType::If);
@@ -1026,6 +1045,7 @@ namespace BBQJITImpl {
             for (auto& box : m_labels)
                 *box = label;
         }
+#endif
 
     BBQJIT::BBQJIT(CCallHelpers& jit, const TypeDefinition& signature, BBQCallee& callee, const FunctionData& function, uint32_t functionIndex, const ModuleInformation& info, Vector<UnlinkedWasmToWasmCall>& unlinkedWasmToWasmCalls, MemoryMode mode, InternalFunction* compilation, std::optional<bool> hasExceptionHandlers, unsigned loopIndexForOSREntry, TierUpCount* tierUp)
         : m_jit(jit)
@@ -1109,6 +1129,8 @@ namespace BBQJITImpl {
         m_localStorage = m_frameSize; // All stack slots allocated so far are locals.
     }
 
+#if SHARED
+
     void BBQJIT::setParser(FunctionParser<BBQJIT>* parser)
     {
         m_parser = parser;
@@ -1181,6 +1203,7 @@ namespace BBQJITImpl {
         }
         return { };
     }
+#endif
 
 #if USE(JSVALUE64)
     Value BBQJIT::instanceValue()
@@ -1243,6 +1266,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addTableSet(unsigned tableIndex, Value index, Value value)
     {
         // FIXME: Emit this inline <https://bugs.webkit.org/show_bug.cgi?id=198506>.
@@ -1423,6 +1447,7 @@ namespace BBQJITImpl {
         ASSERT(ControlData::isAnyCatch(control));
         return Value::fromTemp(TypeKind::Externref, control.enclosedHeight());
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::getGlobal(uint32_t index, Value& result)
@@ -1559,6 +1584,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     void BBQJIT::emitWriteBarrier(GPRReg cellGPR)
     {
         GPRReg vmGPR;
@@ -1593,6 +1619,7 @@ namespace BBQJITImpl {
         noFenceCheck.link(&m_jit);
         belowBlackThreshold.link(&m_jit);
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::setGlobal(uint32_t index, Value value)
@@ -1940,6 +1967,7 @@ namespace BBQJITImpl {
         return functor(Address(wasmScratchGPR, static_cast<int32_t>(uoffset)));
     }
 
+#if SHARED
     inline uint32_t BBQJIT::sizeOfLoadOp(LoadOpType op)
     {
         switch (op) {
@@ -1998,6 +2026,7 @@ namespace BBQJITImpl {
         }
         return Address(pointerLocation.asGPR(), static_cast<int32_t>(uoffset));
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::load(LoadOpType loadOp, Value pointer, Value& result, uint32_t uoffset)
@@ -2198,6 +2227,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     inline uint32_t BBQJIT::sizeOfStoreOp(StoreOpType op)
     {
         switch (op) {
@@ -2217,6 +2247,7 @@ namespace BBQJITImpl {
         }
         RELEASE_ASSERT_NOT_REACHED();
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::store(StoreOpType storeOp, Value pointer, Value value, uint32_t uoffset)
@@ -2352,6 +2383,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addGrowMemory(Value delta, Value& result)
     {
         Vector<Value, 8> arguments = { instanceValue(), delta };
@@ -2472,6 +2504,7 @@ namespace BBQJITImpl {
     {
         return bytesForWidth(accessWidth(op));
     }
+#endif
 
 #if USE(JSVALUE64)
     void BBQJIT::emitSanitizeAtomicResult(ExtAtomicOpType op, TypeKind resultType, GPRReg source, GPRReg dest)
@@ -2980,6 +3013,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::atomicLoad(ExtAtomicOpType loadOp, Type valueType, ExpressionType pointer, ExpressionType& result, uint32_t uoffset)
     {
         if (UNLIKELY(sumOverflows<uint32_t>(uoffset, sizeOfAtomicOpMemoryAccess(loadOp)))) {
@@ -2994,6 +3028,7 @@ namespace BBQJITImpl {
 
         return { };
     }
+#endif
 
 #if USE(JSVALUE64)
     void BBQJIT::emitAtomicStoreOp(ExtAtomicOpType storeOp, Type, Location pointer, Value value, uint32_t uoffset)
@@ -3146,6 +3181,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::atomicStore(ExtAtomicOpType storeOp, Type valueType, ExpressionType pointer, ExpressionType value, uint32_t uoffset)
     {
         Location valueLocation = locationOf(value);
@@ -3161,6 +3197,7 @@ namespace BBQJITImpl {
 
         return { };
     }
+#endif
 
 #if USE(JSVALUE64)
     Value BBQJIT::emitAtomicBinaryRMWOp(ExtAtomicOpType op, Type valueType, Location pointer, Value value, uint32_t uoffset)
@@ -3693,6 +3730,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::atomicBinaryRMW(ExtAtomicOpType op, Type valueType, ExpressionType pointer, ExpressionType value, ExpressionType& result, uint32_t uoffset)
     {
         Location valueLocation = locationOf(value);
@@ -3710,6 +3748,7 @@ namespace BBQJITImpl {
 
         return { };
     }
+#endif
 
 #if USE(JSVALUE64)
     Value WARN_UNUSED_RETURN BBQJIT::emitAtomicCompareExchange(ExtAtomicOpType op, Type, Location pointer, Value expected, Value value, uint32_t uoffset)
@@ -3937,6 +3976,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::atomicCompareExchange(ExtAtomicOpType op, Type valueType, ExpressionType pointer, ExpressionType expected, ExpressionType value, ExpressionType& result, uint32_t uoffset)
     {
         Location valueLocation = locationOf(value);
@@ -4104,6 +4144,7 @@ namespace BBQJITImpl {
 
         return FloatingPointRange { min, max, closedLowerEndpoint };
     }
+#endif
 
 #if USE(JSVALUE64)
 
@@ -4677,6 +4718,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     const Ref<TypeDefinition> BBQJIT::getTypeDefinition(uint32_t typeIndex) { return m_info.typeSignatures[typeIndex]; }
 
     // Given a type index, verify that it's an array type and return its expansion
@@ -4694,6 +4736,7 @@ namespace BBQJITImpl {
         const ArrayType* arrayType = getArrayTypeDefinition(typeIndex);
         return arrayType->elementType().type;
     }
+#endif
 
     // This will replace the existing value with a new value. Note that if this is an F32 then the top bits may be garbage but that's ok for our current usage.
 #if USE(JSVALUE64)
@@ -4742,6 +4785,7 @@ namespace BBQJITImpl {
 #endif
 
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addArrayNew(uint32_t typeIndex, ExpressionType size, ExpressionType initValue, ExpressionType& result)
     {
         initValue = marshallToI64(initValue);
@@ -4858,6 +4902,7 @@ namespace BBQJITImpl {
         LOG_INSTRUCTION("ArrayNewFixed", typeIndex, args.size(), RESULT(result));
         return { };
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addArrayGet(ExtGCOpType arrayGetKind, uint32_t typeIndex, ExpressionType arrayref, ExpressionType index, ExpressionType& result)
@@ -5548,6 +5593,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addRefTest(ExpressionType reference, bool allowNull, int32_t heapType, ExpressionType& result)
     {
         Vector<Value, 8> arguments = {
@@ -5563,6 +5609,7 @@ namespace BBQJITImpl {
 
         return { };
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addRefCast(ExpressionType reference, bool allowNull, int32_t heapType, ExpressionType& result)
@@ -5603,7 +5650,7 @@ namespace BBQJITImpl {
     }
 #endif
 
-
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addAnyConvertExtern(ExpressionType reference, ExpressionType& result)
     {
         Vector<Value, 8> arguments = {
@@ -5709,6 +5756,7 @@ namespace BBQJITImpl {
             )
         );
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Add(Value lhs, Value rhs, Value& result)
@@ -5743,6 +5791,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addF32Add(Value lhs, Value rhs, Value& result)
     {
         EMIT_BINARY(
@@ -5795,6 +5844,7 @@ namespace BBQJITImpl {
             )
         );
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Sub(Value lhs, Value rhs, Value& result)
@@ -5843,6 +5893,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addF32Sub(Value lhs, Value rhs, Value& result)
     {
         EMIT_BINARY(
@@ -5902,6 +5953,7 @@ namespace BBQJITImpl {
             )
         );
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Mul(Value lhs, Value rhs, Value& result)
@@ -5951,6 +6003,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addF32Mul(Value lhs, Value rhs, Value& result)
     {
         EMIT_BINARY(
@@ -6003,6 +6056,7 @@ namespace BBQJITImpl {
     {
         m_exceptions[static_cast<unsigned>(type)].append(jump);
     }
+#endif
 
 #if USE(JSVALUE64)
     void BBQJIT::emitThrowOnNullReference(ExceptionType type, Location ref)
@@ -6437,6 +6491,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     template<typename IntType>
     Value BBQJIT::checkConstantDivision(const Value& lhs, const Value& rhs)
     {
@@ -6788,6 +6843,7 @@ namespace BBQJITImpl {
             )
         );
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI64And(Value lhs, Value rhs, Value& result)
@@ -6824,6 +6880,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI32Xor(Value lhs, Value rhs, Value& result)
     {
         EMIT_BINARY(
@@ -6838,6 +6895,7 @@ namespace BBQJITImpl {
             )
         );
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Xor(Value lhs, Value rhs, Value& result)
@@ -6874,6 +6932,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI32Or(Value lhs, Value rhs, Value& result)
     {
         EMIT_BINARY(
@@ -6888,6 +6947,7 @@ namespace BBQJITImpl {
             )
         );
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Or(Value lhs, Value rhs, Value& result)
@@ -6923,6 +6983,8 @@ namespace BBQJITImpl {
         );
     }
 #endif
+
+#if SHARED
 
 #if CPU(X86_64)
 #define PREPARE_FOR_SHIFT \
@@ -6963,6 +7025,7 @@ namespace BBQJITImpl {
             )
         );
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Shl(Value lhs, Value rhs, Value& result)
@@ -7005,6 +7068,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI32ShrS(Value lhs, Value rhs, Value& result)
     {
         PREPARE_FOR_SHIFT;
@@ -7026,6 +7090,7 @@ namespace BBQJITImpl {
             )
         );
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI64ShrS(Value lhs, Value rhs, Value& result)
@@ -7068,6 +7133,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI32ShrU(Value lhs, Value rhs, Value& result)
     {
         PREPARE_FOR_SHIFT;
@@ -7089,6 +7155,7 @@ namespace BBQJITImpl {
             )
         );
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI64ShrU(Value lhs, Value rhs, Value& result)
@@ -7186,6 +7253,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI32Rotl(Value lhs, Value rhs, Value& result)
     {
         PREPARE_FOR_SHIFT;
@@ -7225,6 +7293,7 @@ namespace BBQJITImpl {
 #endif
         );
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotl(Value lhs, Value rhs, Value& result)
@@ -7285,6 +7354,7 @@ namespace BBQJITImpl {
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI32Rotr(Value lhs, Value rhs, Value& result)
     {
         PREPARE_FOR_SHIFT;
@@ -7306,6 +7376,7 @@ namespace BBQJITImpl {
             )
         );
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value& result)
@@ -7386,6 +7457,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI32Clz(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -7396,6 +7468,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
             )
         );
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Clz(Value operand, Value& result)
@@ -7427,6 +7500,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI32Ctz(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -7437,6 +7511,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
             )
         );
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Ctz(Value operand, Value& result)
@@ -7467,6 +7542,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     PartialResult BBQJIT::emitCompareI32(const char* opcode, Value& lhs, Value& rhs, Value& result, RelationalCondition condition, bool (*comparator)(int32_t lhs, int32_t rhs))
     {
         EMIT_BINARY(
@@ -7483,6 +7559,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
             )
         )
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult BBQJIT::emitCompareI64(const char* opcode, Value& lhs, Value& rhs, Value& result, RelationalCondition condition, bool (*comparator)(int64_t lhs, int64_t rhs))
@@ -7555,6 +7632,8 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
         }
     }
 #endif
+
+#if SHARED
 
 #define RELOP_AS_LAMBDA(op) [](auto lhs, auto rhs) -> auto { return lhs op rhs; }
 #define TYPED_RELOP_AS_LAMBDA(type, op) [](auto lhs, auto rhs) -> auto { return static_cast<type>(lhs) op static_cast<type>(rhs); }
@@ -7754,6 +7833,8 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
 #undef RELOP_AS_LAMBDA
 #undef TYPED_RELOP_AS_LAMBDA
 
+#endif
+
 #if USE(JSVALUE64)
     PartialResult BBQJIT::addI32WrapI64(Value operand, Value& result)
     {
@@ -7778,6 +7859,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     PartialResult BBQJIT::addI32Extend8S(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -7799,6 +7881,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
             )
         )
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Extend8S(Value operand, Value& result)
@@ -7930,6 +8013,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI32Eqz(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -7940,6 +8024,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
             )
         )
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Eqz(Value operand, Value& result)
@@ -7966,6 +8051,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI32Popcnt(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -8026,6 +8112,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
             )
         )
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI64ReinterpretF64(Value operand, Value& result)
@@ -8051,6 +8138,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addF32ReinterpretI32(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -8061,6 +8149,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
             )
         )
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addF64ReinterpretI64(Value operand, Value& result)
@@ -8086,6 +8175,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addF32DemoteF64(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -8118,6 +8208,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
             )
         )
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addF32ConvertUI32(Value operand, Value& result)
@@ -8206,6 +8297,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addF64ConvertSI32(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -8216,6 +8308,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
             )
         )
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addF64ConvertUI32(Value operand, Value& result)
@@ -8304,6 +8397,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addF32Copysign(Value lhs, Value rhs, Value& result)
     {
         EMIT_BINARY(
@@ -8356,6 +8450,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
             )
         )
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addF64Copysign(Value lhs, Value rhs, Value& result)
@@ -8565,6 +8660,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addF32Abs(Value operand, Value& result)
     {
         EMIT_UNARY(
@@ -8652,6 +8748,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
             )
         )
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addF32Nearest(Value operand, Value& result)
@@ -8757,6 +8854,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addI32TruncSF32(Value operand, Value& result)
     {
         return truncTrapping(OpType::I32TruncSF32, operand, result, Types::I32, Types::F32);
@@ -8796,6 +8894,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     {
         return truncTrapping(OpType::I64TruncUF64, operand, result, Types::I64, Types::F64);
     }
+#endif
 
     // References
 
@@ -8867,6 +8966,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addRefEq(Value ref0, Value ref1, Value& result)
     {
         return addI64Eq(ref0, ref1, result);
@@ -9402,6 +9502,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
         result.startBlock(*this, newStack);
         return { };
     }
+#endif
 
 #if USE(JSVALUE64)
     void BBQJIT::emitCatchPrologue()
@@ -9578,6 +9679,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::addCatch(unsigned exceptionIndex, const TypeDefinition& exceptionSignature, Stack& expressionStack, ControlType& data, ResultList& results)
     {
         m_usesExceptions = true;
@@ -9713,6 +9815,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
 
         return { };
     }
+#endif
 
 #if USE(JSVALUE64)
     PartialResult WARN_UNUSED_RETURN BBQJIT::addRethrow(unsigned, ControlType& data)
@@ -9748,6 +9851,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     void BBQJIT::prepareForExceptions()
     {
         ++m_callSiteIndex;
@@ -9976,6 +10080,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
 
         return { };
     }
+#endif
 
 #if USE(JSVALUE64)
     int BBQJIT::alignedFrameSize(int frameSize)
@@ -9991,6 +10096,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     PartialResult WARN_UNUSED_RETURN BBQJIT::endTopLevel(BlockSignature, const Stack&)
     {
         int frameSize = m_frameSize + m_maxCalleeStackSize;
@@ -10038,6 +10144,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     {
         m_jit.loadPtr(Address(GPRInfo::callFrameRegister, CallFrameSlot::codeBlock * sizeof(Register)), GPRInfo::wasmContextInstancePointer);
     }
+#endif
 
 #if USE(JSVALUE64)
     void BBQJIT::restoreWebAssemblyGlobalState()
@@ -10054,11 +10161,13 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     void BBQJIT::loadWebAssemblyGlobalState(GPRReg wasmBaseMemoryPointer, GPRReg wasmBoundsCheckingSizeRegister)
     {
         m_jit.loadPairPtr(GPRInfo::wasmContextInstancePointer, TrustedImm32(Instance::offsetOfCachedMemory()), wasmBaseMemoryPointer, wasmBoundsCheckingSizeRegister);
         m_jit.cageConditionallyAndUntag(Gigacage::Primitive, wasmBaseMemoryPointer, wasmBoundsCheckingSizeRegister, wasmScratchGPR, /* validateAuth */ true, /* mayBeNull */ false);
     }
+#endif
 
 #if USE(JSVALUE64)
     void BBQJIT::restoreWebAssemblyGlobalStateAfterWasmCall()
@@ -10082,6 +10191,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     void BBQJIT::flushRegistersForException()
     {
         // Flush all locals.
@@ -10613,6 +10723,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     ALWAYS_INLINE void BBQJIT::didParseOpcode()
     {
     }
+#endif
 
     // SIMD
 
@@ -11910,6 +12021,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
 
 #endif // USE(JSVALUE32_64)
 
+#if SHARED
     void BBQJIT::dump(const ControlStack&, const Stack*) { }
     void BBQJIT::didFinishParsingLocals() { }
     void BBQJIT::didPopValueFromStack(ExpressionType, String) { }
@@ -11946,6 +12058,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     {
         return (loc.isGPR() && loc.asGPR() == wasmScratchGPR) || (loc.isFPR() && loc.asFPR() == wasmScratchFPR);
     }
+#endif
 
 #if USE(JSVALUE64)
     void BBQJIT::emitStoreConst(Value constant, Location loc)
@@ -12201,6 +12314,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     void BBQJIT::emitStore(Value src, Location dst)
     {
         if (src.isConst())
@@ -12209,6 +12323,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
         LOG_INSTRUCTION("Store", src, RESULT(dst));
         emitStore(src.type(), locationOf(src), dst);
     }
+#endif
 
 #if USE(JSVALUE64)
     void BBQJIT::emitMoveMemory(TypeKind type, Location src, Location dst)
@@ -12311,11 +12426,13 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     void BBQJIT::emitMoveMemory(Value src, Location dst)
     {
         LOG_INSTRUCTION("Move", src, RESULT(dst));
         emitMoveMemory(src.type(), locationOf(src), dst);
     }
+#endif
 
 #if USE(JSVALUE64)
     void BBQJIT::emitMoveRegister(TypeKind type, Location src, Location dst)
@@ -12397,6 +12514,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     void BBQJIT::emitMoveRegister(Value src, Location dst)
     {
         if (!isScratch(locationOf(src)) && !isScratch(dst))
@@ -12404,6 +12522,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
 
         emitMoveRegister(src.type(), locationOf(src), dst);
     }
+#endif
 
 #if USE(JSVALUE64)
     void BBQJIT::emitLoad(TypeKind type, Location src, Location dst)
@@ -12487,6 +12606,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     void BBQJIT::emitLoad(Value src, Location dst)
     {
         if (!isScratch(dst))
@@ -12522,6 +12642,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
             emitMove(src.type(), srcLocation, dst);
         }
     }
+#endif
 
 #if USE(JSVALUE64)
     template<size_t N, typename OverflowHandler>
@@ -12609,6 +12730,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     template<size_t N, typename OverflowHandler>
     void BBQJIT::emitShuffle(Vector<Value, N, OverflowHandler>& srcVector, Vector<Location, N, OverflowHandler>& dstVector)
     {
@@ -12632,6 +12754,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     {
         return m_parser->controlStack().last().controlData;
     }
+#endif
 
 #if USE(JSVALUE64)
     void BBQJIT::setLRUKey(Location location, LocalOrTempIndex key)
@@ -12655,6 +12778,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     void BBQJIT::increaseKey(Location location)
     {
         setLRUKey(location, m_lastUseTimestamp ++);
@@ -12764,6 +12888,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
         if (value.isTemp() && location != canonicalSlot(value))
             unbind(value, location);
     }
+#endif
 
 #if USE(JSVALUE64)
     Location BBQJIT::allocateRegister(TypeKind type)
@@ -12809,6 +12934,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI64Rotr(Value lhs, Value rhs, Value&
     }
 #endif
 
+#if SHARED
     Location BBQJIT::allocateRegister(Value value)
     {
         return allocateRegister(value.type());
@@ -13022,6 +13148,8 @@ Expected<std::unique_ptr<InternalFunction>, String> parseAndCompileBBQ(Compilati
 
     return result;
 }
+
+#endif
 
 } } // namespace JSC::Wasm
 
