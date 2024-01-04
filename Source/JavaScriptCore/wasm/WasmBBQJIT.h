@@ -200,7 +200,7 @@ public:
     static bool typeNeedsGPR2(TypeKind type);
 
 public:
-    static ALWAYS_INLINE uint32_t sizeOfType(TypeKind type);
+    static uint32_t sizeOfType(TypeKind type);
 
     static TypeKind toValueKind(TypeKind kind);
 
@@ -215,42 +215,155 @@ public:
             Pinned = 4 // Used if we need to represent a Location as a Value, mostly in operation calls
         };
 
-        ALWAYS_INLINE bool isNone() const;
+        ALWAYS_INLINE bool isNone() const
+        {
+            return m_kind == None;
+        }
 
-        ALWAYS_INLINE bool isTemp() const;
+        ALWAYS_INLINE bool isTemp() const
+        {
+            return m_kind == Temp;
+        }
 
-        ALWAYS_INLINE bool isLocal() const;
+        ALWAYS_INLINE bool isLocal() const
+        {
+            return m_kind == Local;
+        }
+
+        ALWAYS_INLINE bool isPinned() const
+        {
+            return m_kind == Pinned;
+        }
+
+        ALWAYS_INLINE Kind kind() const
+        {
+            return m_kind;
+        }
+
+        ALWAYS_INLINE int32_t asI32() const
+        {
+            ASSERT(m_kind == Const);
+            return m_i32;
+        }
+
+        ALWAYS_INLINE int64_t asI64() const
+        {
+            ASSERT(m_kind == Const);
+            return m_i64;
+        }
+
+        ALWAYS_INLINE float asF32() const
+        {
+            ASSERT(m_kind == Const);
+            return m_f32;
+        }
+
+        ALWAYS_INLINE double asF64() const
+        {
+            ASSERT(m_kind == Const);
+            return m_f64;
+        }
+
+        ALWAYS_INLINE EncodedJSValue asRef() const
+        {
+            ASSERT(m_kind == Const);
+            return m_ref;
+        }
+
+        ALWAYS_INLINE LocalOrTempIndex asTemp() const
+        {
+            ASSERT(m_kind == Temp);
+            return m_index;
+        }
+
+        ALWAYS_INLINE LocalOrTempIndex asLocal() const
+        {
+            ASSERT(m_kind == Local);
+            return m_index;
+        }
 
         ALWAYS_INLINE bool isConst() const
         {
             return m_kind == Const;
         }
 
-        ALWAYS_INLINE bool isPinned() const;
+        ALWAYS_INLINE Location asPinned() const
+        {
+            ASSERT(m_kind == Pinned);
+            return m_pinned;
+        }
 
-        ALWAYS_INLINE Kind kind() const;
+        ALWAYS_INLINE static Value fromI32(int32_t immediate)
+        {
+            Value val;
+            val.m_kind = Const;
+            val.m_type = TypeKind::I32;
+            val.m_i32 = immediate;
+            return val;
+        }
 
-        ALWAYS_INLINE int32_t asI32() const;
+        ALWAYS_INLINE static Value fromI64(int64_t immediate)
+        {
+            Value val;
+            val.m_kind = Const;
+            val.m_type = TypeKind::I64;
+            val.m_i64 = immediate;
+            return val;
+        }
 
-#if USE(JSVALUE32_64)
-        ALWAYS_INLINE int32_t asI64hi() const;
+        ALWAYS_INLINE static Value fromF32(float immediate)
+        {
+            Value val;
+            val.m_kind = Const;
+            val.m_type = TypeKind::F32;
+            val.m_f32 = immediate;
+            return val;
+        }
 
-        ALWAYS_INLINE int32_t asI64lo() const;
-#endif
+        ALWAYS_INLINE static Value fromF64(double immediate)
+        {
+            Value val;
+            val.m_kind = Const;
+            val.m_type = TypeKind::F64;
+            val.m_f64 = immediate;
+            return val;
+        }
 
-        ALWAYS_INLINE int64_t asI64() const;
+        ALWAYS_INLINE static Value fromRef(TypeKind refType, EncodedJSValue ref)
+        {
+            Value val;
+            val.m_kind = Const;
+            val.m_type = toValueKind(refType);
+            val.m_ref = ref;
+            return val;
+        }
 
-        ALWAYS_INLINE float asF32() const;
+        ALWAYS_INLINE static Value fromTemp(TypeKind type, LocalOrTempIndex temp)
+        {
+            Value val;
+            val.m_kind = Temp;
+            val.m_type = toValueKind(type);
+            val.m_index = temp;
+            return val;
+        }
 
-        ALWAYS_INLINE double asF64() const;
+        ALWAYS_INLINE static Value fromLocal(TypeKind type, LocalOrTempIndex local)
+        {
+            Value val;
+            val.m_kind = Local;
+            val.m_type = toValueKind(type);
+            val.m_index = local;
+            return val;
+        }
 
-        ALWAYS_INLINE EncodedJSValue asRef() const;
-
-        ALWAYS_INLINE LocalOrTempIndex asTemp() const;
-
-        ALWAYS_INLINE LocalOrTempIndex asLocal() const;
-
-        ALWAYS_INLINE Location asPinned() const;
+        ALWAYS_INLINE static Value pinned(TypeKind type, Location location)
+        {
+            Value val;
+            val.m_kind = Pinned;
+            val.m_type = toValueKind(type);
+            val.m_pinned = location;
+            return val;
+        }
 
         ALWAYS_INLINE static Value none()
         {
@@ -259,31 +372,31 @@ public:
             return val;
         }
 
-        ALWAYS_INLINE static Value fromI32(int32_t immediate);
+        ALWAYS_INLINE uint32_t size() const
+        {
+            return sizeOfType(m_type);
+        }
 
-        ALWAYS_INLINE static Value fromI64(int64_t immediate);
+        ALWAYS_INLINE bool isFloat() const
+        {
+            return isFloatingPointType(m_type);
+        }
 
-        ALWAYS_INLINE static Value fromF32(float immediate);
-
-        ALWAYS_INLINE static Value fromF64(double immediate);
-
-        ALWAYS_INLINE static Value fromRef(TypeKind refType, EncodedJSValue ref);
-
-        ALWAYS_INLINE static Value fromTemp(TypeKind type, LocalOrTempIndex temp);
-
-        ALWAYS_INLINE static Value fromLocal(TypeKind type, LocalOrTempIndex local);
-
-        ALWAYS_INLINE static Value pinned(TypeKind type, Location location);
+        ALWAYS_INLINE TypeKind type() const
+        {
+            ASSERT(isValidValueTypeKind(m_type));
+            return m_type;
+        }
 
         ALWAYS_INLINE Value()
             : m_kind(None)
         { }
 
-        ALWAYS_INLINE uint32_t size() const;
+#if USE(JSVALUE32_64)
+        int32_t asI64hi() const;
 
-        ALWAYS_INLINE bool isFloat() const;
-
-        ALWAYS_INLINE TypeKind type() const;
+        int32_t asI64lo() const;
+#endif
 
         void dump(PrintStream& out) const;
 
@@ -789,11 +902,151 @@ public:
     inline Location emitCheckAndPreparePointer(Value pointer, uint32_t uoffset, uint32_t sizeOfOperation);
 
     template<typename Functor>
-    auto emitCheckAndPrepareAndMaterializePointerApply(Value pointer, uint32_t uoffset, uint32_t sizeOfOperation, Functor&& functor) -> decltype(auto);
+    auto emitCheckAndPrepareAndMaterializePointerApply(Value pointer, uint32_t uoffset, uint32_t sizeOfOperation, Functor&& functor) -> decltype(auto)
+    {
+        uint64_t boundary = static_cast<uint64_t>(sizeOfOperation) + uoffset - 1;
 
-    static inline uint32_t sizeOfLoadOp(LoadOpType op);
+        ScratchScope<1, 0> scratches(*this);
+        Location pointerLocation;
 
-    static inline TypeKind typeOfLoadOp(LoadOpType op);
+#if USE(JSVALUE32_64)
+        ScratchScope<2, 0> globals(*this);
+        GPRReg wasmBaseMemoryPointer = globals.gpr(0);
+        GPRReg wasmBoundsCheckingSizeRegister = globals.gpr(1);
+        loadWebAssemblyGlobalState(wasmBaseMemoryPointer, wasmBoundsCheckingSizeRegister);
+#endif
+
+        if (pointer.isConst()) {
+            uint64_t constantPointer = static_cast<uint64_t>(static_cast<uint32_t>(pointer.asI32()));
+            uint64_t finalOffset = constantPointer + uoffset;
+            if (!(finalOffset > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) || !B3::Air::Arg::isValidAddrForm(B3::Air::Move, finalOffset, Width::Width128))) {
+                switch (m_mode) {
+                case MemoryMode::BoundsChecking: {
+                    m_jit.move(TrustedImmPtr(constantPointer + boundary), wasmScratchGPR);
+                    throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchPtr(RelationalCondition::AboveOrEqual, wasmScratchGPR, wasmBoundsCheckingSizeRegister));
+                    break;
+                }
+                case MemoryMode::Signaling: {
+                    if (uoffset >= Memory::fastMappedRedzoneBytes()) {
+                        uint64_t maximum = m_info.memory.maximum() ? m_info.memory.maximum().bytes() : std::numeric_limits<uint32_t>::max();
+                        if ((constantPointer + boundary) >= maximum)
+                            throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.jump());
+                    }
+                    break;
+                }
+                }
+                return functor(CCallHelpers::Address(wasmBaseMemoryPointer, static_cast<int32_t>(finalOffset)));
+            }
+            pointerLocation = Location::fromGPR(scratches.gpr(0));
+            emitMoveConst(pointer, pointerLocation);
+        } else
+            pointerLocation = loadIfNecessary(pointer);
+        ASSERT(pointerLocation.isGPR());
+
+        switch (m_mode) {
+        case MemoryMode::BoundsChecking: {
+            // We're not using signal handling only when the memory is not shared.
+            // Regardless of signaling, we must check that no memory access exceeds the current memory size.
+            m_jit.zeroExtend32ToWord(pointerLocation.asGPR(), wasmScratchGPR);
+            if (boundary)
+#if USE(JSVALUE64)
+                m_jit.addPtr(TrustedImmPtr(boundary), wasmScratchGPR);
+#else
+                // NB: On 32-bit we have to check the addition for overflow
+                throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchAdd32(ResultCondition::Carry, wasmScratchGPR, TrustedImm32(boundary), wasmScratchGPR));
+#endif
+            throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchPtr(RelationalCondition::AboveOrEqual, wasmScratchGPR, wasmBoundsCheckingSizeRegister));
+            break;
+        }
+
+        case MemoryMode::Signaling: {
+            // We've virtually mapped 4GiB+redzone for this memory. Only the user-allocated pages are addressable, contiguously in range [0, current],
+            // and everything above is mapped PROT_NONE. We don't need to perform any explicit bounds check in the 4GiB range because WebAssembly register
+            // memory accesses are 32-bit. However WebAssembly register + offset accesses perform the addition in 64-bit which can push an access above
+            // the 32-bit limit (the offset is unsigned 32-bit). The redzone will catch most small offsets, and we'll explicitly bounds check any
+            // register + large offset access. We don't think this will be generated frequently.
+            //
+            // We could check that register + large offset doesn't exceed 4GiB+redzone since that's technically the limit we need to avoid overflowing the
+            // PROT_NONE region, but it's better if we use a smaller immediate because it can codegens better. We know that anything equal to or greater
+            // than the declared 'maximum' will trap, so we can compare against that number. If there was no declared 'maximum' then we still know that
+            // any access equal to or greater than 4GiB will trap, no need to add the redzone.
+            if (uoffset >= Memory::fastMappedRedzoneBytes()) {
+                uint64_t maximum = m_info.memory.maximum() ? m_info.memory.maximum().bytes() : std::numeric_limits<uint32_t>::max();
+                m_jit.zeroExtend32ToWord(pointerLocation.asGPR(), wasmScratchGPR);
+                if (boundary)
+                    m_jit.addPtr(TrustedImmPtr(boundary), wasmScratchGPR);
+                throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchPtr(RelationalCondition::AboveOrEqual, wasmScratchGPR, TrustedImmPtr(static_cast<int64_t>(maximum))));
+            }
+            break;
+        }
+        }
+
+#if CPU(ARM64)
+        if (!(static_cast<uint64_t>(uoffset) > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) || !B3::Air::Arg::isValidAddrForm(B3::Air::Move, uoffset, Width::Width128)))
+            return functor(CCallHelpers::BaseIndex(wasmBaseMemoryPointer, pointerLocation.asGPR(), CCallHelpers::TimesOne, static_cast<int32_t>(uoffset), CCallHelpers::Extend::ZExt32));
+
+        m_jit.addZeroExtend64(wasmBaseMemoryPointer, pointerLocation.asGPR(), wasmScratchGPR);
+#else
+        m_jit.zeroExtend32ToWord(pointerLocation.asGPR(), wasmScratchGPR);
+        m_jit.addPtr(wasmBaseMemoryPointer, wasmScratchGPR);
+#endif
+
+        if (static_cast<uint64_t>(uoffset) > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) || !B3::Air::Arg::isValidAddrForm(B3::Air::Move, uoffset, Width::Width128)) {
+            m_jit.addPtr(TrustedImmPtr(static_cast<int64_t>(uoffset)), wasmScratchGPR);
+            return functor(Address(wasmScratchGPR));
+        }
+        return functor(Address(wasmScratchGPR, static_cast<int32_t>(uoffset)));
+    }
+
+    static inline uint32_t sizeOfLoadOp(LoadOpType op)
+    {
+        switch (op) {
+        case LoadOpType::I32Load8S:
+        case LoadOpType::I32Load8U:
+        case LoadOpType::I64Load8S:
+        case LoadOpType::I64Load8U:
+            return 1;
+        case LoadOpType::I32Load16S:
+        case LoadOpType::I64Load16S:
+        case LoadOpType::I32Load16U:
+        case LoadOpType::I64Load16U:
+            return 2;
+        case LoadOpType::I32Load:
+        case LoadOpType::I64Load32S:
+        case LoadOpType::I64Load32U:
+        case LoadOpType::F32Load:
+            return 4;
+        case LoadOpType::I64Load:
+        case LoadOpType::F64Load:
+            return 8;
+        }
+        RELEASE_ASSERT_NOT_REACHED();
+    }
+
+    static inline TypeKind typeOfLoadOp(LoadOpType op)
+    {
+        switch (op) {
+        case LoadOpType::I32Load8S:
+        case LoadOpType::I32Load8U:
+        case LoadOpType::I32Load16S:
+        case LoadOpType::I32Load16U:
+        case LoadOpType::I32Load:
+            return TypeKind::I32;
+        case LoadOpType::I64Load8S:
+        case LoadOpType::I64Load8U:
+        case LoadOpType::I64Load16S:
+        case LoadOpType::I64Load16U:
+        case LoadOpType::I64Load32S:
+        case LoadOpType::I64Load32U:
+        case LoadOpType::I64Load:
+            return TypeKind::I64;
+        case LoadOpType::F32Load:
+            return TypeKind::F32;
+        case LoadOpType::F64Load:
+            return TypeKind::F64;
+        }
+        RELEASE_ASSERT_NOT_REACHED();
+    }
 
     Address materializePointer(Location pointerLocation, uint32_t uoffset);
 
@@ -805,7 +1058,25 @@ public:
 
     PartialResult WARN_UNUSED_RETURN load(LoadOpType loadOp, Value pointer, Value& result, uint32_t uoffset);
 
-    inline uint32_t sizeOfStoreOp(StoreOpType op);
+    inline uint32_t sizeOfStoreOp(StoreOpType op)
+    {
+        switch (op) {
+        case StoreOpType::I32Store8:
+        case StoreOpType::I64Store8:
+            return 1;
+        case StoreOpType::I32Store16:
+        case StoreOpType::I64Store16:
+            return 2;
+        case StoreOpType::I32Store:
+        case StoreOpType::I64Store32:
+        case StoreOpType::F32Store:
+            return 4;
+        case StoreOpType::I64Store:
+        case StoreOpType::F64Store:
+            return 8;
+        }
+        RELEASE_ASSERT_NOT_REACHED();
+    }
 
     constexpr static const char* STORE_OP_NAMES[9] = {
         "I32Store", "I64Store", "F32Store", "F64Store",
@@ -829,9 +1100,15 @@ public:
 
     // Atomics
 
-    static inline Width accessWidth(ExtAtomicOpType op);
+    static inline Width accessWidth(ExtAtomicOpType op)
+    {
+        return static_cast<Width>(memoryLog2Alignment(op));
+    }
 
-    static inline uint32_t sizeOfAtomicOpMemoryAccess(ExtAtomicOpType op);
+    static inline uint32_t sizeOfAtomicOpMemoryAccess(ExtAtomicOpType op)
+    {
+        return bytesForWidth(accessWidth(op));
+    }
 
     void emitSanitizeAtomicResult(ExtAtomicOpType op, TypeKind resultType, Location source, Location dest);
 
@@ -869,7 +1146,10 @@ public:
 
     // Saturated truncation.
 
-    struct FloatingPointRange;
+    struct FloatingPointRange {
+        Value min, max;
+        bool closedLowerEndpoint;
+    };
 
     enum class TruncationKind {
         I32TruncF32S,
@@ -1152,9 +1432,25 @@ public:
 
     PartialResult WARN_UNUSED_RETURN addF64Max(Value lhs, Value rhs, Value& result);
 
-    inline float floatCopySign(float lhs, float rhs);
+    inline float floatCopySign(float lhs, float rhs)
+    {
+        uint32_t lhsAsInt32 = bitwise_cast<uint32_t>(lhs);
+        uint32_t rhsAsInt32 = bitwise_cast<uint32_t>(rhs);
+        lhsAsInt32 &= 0x7fffffffu;
+        rhsAsInt32 &= 0x80000000u;
+        lhsAsInt32 |= rhsAsInt32;
+        return bitwise_cast<float>(lhsAsInt32);
+    }
 
-    inline double doubleCopySign(double lhs, double rhs);
+    inline double doubleCopySign(double lhs, double rhs)
+    {
+        uint64_t lhsAsInt64 = bitwise_cast<uint64_t>(lhs);
+        uint64_t rhsAsInt64 = bitwise_cast<uint64_t>(rhs);
+        lhsAsInt64 &= 0x7fffffffffffffffu;
+        rhsAsInt64 &= 0x8000000000000000u;
+        lhsAsInt64 |= rhsAsInt64;
+        return bitwise_cast<double>(lhsAsInt64);
+    }
 
     PartialResult WARN_UNUSED_RETURN addI32And(Value lhs, Value rhs, Value& result);
 
@@ -1168,6 +1464,16 @@ public:
     PartialResult WARN_UNUSED_RETURN addI32Or(Value lhs, Value rhs, Value& result);
 
     PartialResult WARN_UNUSED_RETURN addI64Or(Value lhs, Value rhs, Value& result);
+
+#if CPU(X86_64)
+#define PREPARE_FOR_SHIFT \
+    do { \
+        clobber(shiftRCX); \
+    } while (false); \
+    ScratchScope<0, 0> scratches(*this, Location::fromGPR(shiftRCX))
+#else
+#define PREPARE_FOR_SHIFT
+#endif
 
     void moveShiftAmountIfNecessary(Location& rhsLocation);
 
