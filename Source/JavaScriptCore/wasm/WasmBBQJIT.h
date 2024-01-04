@@ -1393,6 +1393,32 @@ public:
 
     void emitThrowOnNullReference(ExceptionType type, Location ref);
 
+#if CPU(X86_64)
+    RegisterSet clobbersForDivX86()
+    {
+        static RegisterSet x86DivClobbers;
+        static std::once_flag flag;
+        std::call_once(
+            flag,
+            []() {
+                RegisterSetBuilder builder;
+                builder.add(X86Registers::eax, IgnoreVectors);
+                builder.add(X86Registers::edx, IgnoreVectors);
+                x86DivClobbers = builder.buildAndValidate();
+            });
+        return x86DivClobbers;
+    }
+
+#define PREPARE_FOR_MOD_OR_DIV \
+    do { \
+        for (JSC::Reg reg : clobbersForDivX86()) \
+            clobber(reg); \
+    } while (false); \
+    ScratchScope<0, 0> scratches(*this, clobbersForDivX86())
+#else
+#define PREPARE_FOR_MOD_OR_DIV
+#endif
+
     template<typename IntType, bool IsMod>
     void emitModOrDiv(Value& lhs, Location lhsLocation, Value& rhs, Location rhsLocation, Value& result, Location resultLocation);
 
@@ -1780,10 +1806,130 @@ public:
     void returnValuesFromCall(Vector<Value, N>& results, const FunctionSignature& functionType, const CallInformation& callInfo);
 
     template<typename Func, size_t N>
-    void emitCCall(Func function, const Vector<Value, N>& arguments);
+    void emitCCall(Func function, const Vector<Value, N>& arguments)
+    {
+        // Currently, we assume the Wasm calling convention is the same as the C calling convention
+        Vector<Type, 16> resultTypes;
+        auto argumentTypes = WTF::map<16>(arguments, [](auto& value) {
+            return Type { value.type(), 0u };
+        });
+        RefPtr<TypeDefinition> functionType = TypeInformation::typeDefinitionForFunction(resultTypes, argumentTypes);
+#if CPU(ARM64) || CPU(X86_64)
+        CallInformation callInfo = wasmCallingConvention().callInformationFor(*functionType, CallRole::Caller);
+#elif CPU(ARM)
+        CallInformation callInfo = cCallingConventionArmThumb2().callInformationFor(*functionType, CallRole::Caller);
+#endif
+        Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), callInfo.headerAndArgumentStackSizeInBytes);
+        m_maxCalleeStackSize = std::max<int>(calleeStackSize, m_maxCalleeStackSize);
+
+        // Prepare wasm operation calls.
+        m_jit.prepareWasmCallOperation(GPRInfo::wasmContextInstancePointer);
+
+        // Preserve caller-saved registers and other info
+        prepareForExceptions();
+        saveValuesAcrossCallAndPassArguments(arguments, callInfo, *functionType);
+
+        // Materialize address of native function and call register
+        void* taggedFunctionPtr = tagCFunctionPtr<void*, OperationPtrTag>(function);
+        m_jit.move(TrustedImmPtr(bitwise_cast<uintptr_t>(taggedFunctionPtr)), wasmScratchGPR);
+        m_jit.call(wasmScratchGPR, OperationPtrTag);
+    }
 
     template<typename Func, size_t N>
-    void emitCCall(Func function, const Vector<Value, N>& arguments, Value& result);
+    void emitCCall(Func function, const Vector<Value, N>& arguments, Value& result)
+    {
+        ASSERT(result.isTemp());
+
+        // Currently, we assume the Wasm calling convention is the same as the C calling convention
+        Vector<Type, 16> resultTypes = { Type { result.type(), 0u } };
+        auto argumentTypes = WTF::map<16>(arguments, [](auto& value) {
+            return Type { value.type(), 0u };
+        });
+
+        RefPtr<TypeDefinition> functionType = TypeInformation::typeDefinitionForFunction(resultTypes, argumentTypes);
+#if CPU(ARM64) || CPU(X86_64)
+        CallInformation callInfo = wasmCallingConvention().callInformationFor(*functionType, CallRole::Caller);
+#elif CPU(ARM)
+        CallInformation callInfo = cCallingConventionArmThumb2().callInformationFor(*functionType, CallRole::Caller);
+#endif
+        Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), callInfo.headerAndArgumentStackSizeInBytes);
+        m_maxCalleeStackSize = std::max<int>(calleeStackSize, m_maxCalleeStackSize);
+
+        // Prepare wasm operation calls.
+        m_jit.prepareWasmCallOperation(GPRInfo::wasmContextInstancePointer);
+
+        // Preserve caller-saved registers and other info
+        prepareForExceptions();
+        saveValuesAcrossCallAndPassArguments(arguments, callInfo, *functionType);
+
+        // Materialize address of native function and call register
+        void* taggedFunctionPtr = tagCFunctionPtr<void*, OperationPtrTag>(function);
+        m_jit.move(TrustedImmPtr(bitwise_cast<uintptr_t>(taggedFunctionPtr)), wasmScratchGPR);
+        m_jit.call(wasmScratchGPR, OperationPtrTag);
+
+        Location resultLocation;
+        switch (result.type()) {
+        case TypeKind::I32:
+#if USE(JSVALUE32_64)
+            resultLocation = Location::fromGPR(GPRInfo::returnValueGPR);
+            break;
+#endif
+        case TypeKind::I31ref:
+        case TypeKind::I64:
+        case TypeKind::Ref:
+        case TypeKind::RefNull:
+        case TypeKind::Arrayref:
+        case TypeKind::Structref:
+        case TypeKind::Funcref:
+        case TypeKind::Externref:
+        case TypeKind::Eqref:
+        case TypeKind::Anyref:
+        case TypeKind::Nullref:
+        case TypeKind::Nullfuncref:
+        case TypeKind::Nullexternref:
+        case TypeKind::Rec:
+        case TypeKind::Sub:
+        case TypeKind::Subfinal:
+        case TypeKind::Array:
+        case TypeKind::Struct:
+        case TypeKind::Func: {
+#if USE(JSVALUE64)
+            resultLocation = Location::fromGPR(GPRInfo::returnValueGPR);
+#else
+            resultLocation = Location::fromGPR2(GPRInfo::returnValueGPR2, GPRInfo::returnValueGPR);
+#endif
+            ASSERT(m_validGPRs.contains(GPRInfo::returnValueGPR, IgnoreVectors));
+            break;
+        }
+        case TypeKind::F32:
+        case TypeKind::F64: {
+            resultLocation = Location::fromFPR(FPRInfo::returnValueFPR);
+            ASSERT(m_validFPRs.contains(FPRInfo::returnValueFPR, Width::Width128));
+            break;
+        }
+        case TypeKind::V128: {
+            resultLocation = Location::fromFPR(FPRInfo::returnValueFPR);
+            ASSERT(m_validFPRs.contains(FPRInfo::returnValueFPR, Width::Width128));
+            break;
+        }
+        case TypeKind::Void:
+            RELEASE_ASSERT_NOT_REACHED();
+            break;
+        }
+
+        RegisterBinding currentBinding;
+        if (resultLocation.isGPR())
+            currentBinding = m_gprBindings[resultLocation.asGPR()];
+        else if (resultLocation.isFPR())
+            currentBinding = m_fprBindings[resultLocation.asFPR()];
+#if USE(JSVALUE32_64)
+        else if (resultLocation.isGPR2())
+            currentBinding = m_gprBindings[resultLocation.asGPRhi()];
+#endif
+        RELEASE_ASSERT(!currentBinding.isScratch());
+
+        bind(result, resultLocation);
+    }
 
     PartialResult WARN_UNUSED_RETURN addCall(unsigned functionIndex, const TypeDefinition& signature, Vector<Value>& arguments, ResultList& results, CallType callType = CallType::Call);
 
