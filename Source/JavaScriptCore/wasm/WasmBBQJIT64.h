@@ -36,6 +36,91 @@
 
 namespace JSC { namespace Wasm { namespace BBQJITImpl {
 
+template<typename Functor>
+auto BBQJIT::emitCheckAndPrepareAndMaterializePointerApply(Value pointer, uint32_t uoffset, uint32_t sizeOfOperation, Functor&& functor) -> decltype(auto)
+{
+    uint64_t boundary = static_cast<uint64_t>(sizeOfOperation) + uoffset - 1;
+
+    ScratchScope<1, 0> scratches(*this);
+    Location pointerLocation;
+
+    if (pointer.isConst()) {
+        uint64_t constantPointer = static_cast<uint64_t>(static_cast<uint32_t>(pointer.asI32()));
+        uint64_t finalOffset = constantPointer + uoffset;
+        if (!(finalOffset > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) || !B3::Air::Arg::isValidAddrForm(B3::Air::Move, finalOffset, Width::Width128))) {
+            switch (m_mode) {
+            case MemoryMode::BoundsChecking: {
+                m_jit.move(TrustedImmPtr(constantPointer + boundary), wasmScratchGPR);
+                throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchPtr(RelationalCondition::AboveOrEqual, wasmScratchGPR, wasmBoundsCheckingSizeRegister));
+                break;
+            }
+            case MemoryMode::Signaling: {
+                if (uoffset >= Memory::fastMappedRedzoneBytes()) {
+                    uint64_t maximum = m_info.memory.maximum() ? m_info.memory.maximum().bytes() : std::numeric_limits<uint32_t>::max();
+                    if ((constantPointer + boundary) >= maximum)
+                        throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.jump());
+                }
+                break;
+            }
+            }
+            return functor(CCallHelpers::Address(wasmBaseMemoryPointer, static_cast<int32_t>(finalOffset)));
+        }
+        pointerLocation = Location::fromGPR(scratches.gpr(0));
+        emitMoveConst(pointer, pointerLocation);
+    } else
+        pointerLocation = loadIfNecessary(pointer);
+    ASSERT(pointerLocation.isGPR());
+
+    switch (m_mode) {
+    case MemoryMode::BoundsChecking: {
+        // We're not using signal handling only when the memory is not shared.
+        // Regardless of signaling, we must check that no memory access exceeds the current memory size.
+        m_jit.zeroExtend32ToWord(pointerLocation.asGPR(), wasmScratchGPR);
+        if (boundary)
+            m_jit.addPtr(TrustedImmPtr(boundary), wasmScratchGPR);
+        throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchPtr(RelationalCondition::AboveOrEqual, wasmScratchGPR, wasmBoundsCheckingSizeRegister));
+        break;
+    }
+
+    case MemoryMode::Signaling: {
+        // We've virtually mapped 4GiB+redzone for this memory. Only the user-allocated pages are addressable, contiguously in range [0, current],
+        // and everything above is mapped PROT_NONE. We don't need to perform any explicit bounds check in the 4GiB range because WebAssembly register
+        // memory accesses are 32-bit. However WebAssembly register + offset accesses perform the addition in 64-bit which can push an access above
+        // the 32-bit limit (the offset is unsigned 32-bit). The redzone will catch most small offsets, and we'll explicitly bounds check any
+        // register + large offset access. We don't think this will be generated frequently.
+        //
+        // We could check that register + large offset doesn't exceed 4GiB+redzone since that's technically the limit we need to avoid overflowing the
+        // PROT_NONE region, but it's better if we use a smaller immediate because it can codegens better. We know that anything equal to or greater
+        // than the declared 'maximum' will trap, so we can compare against that number. If there was no declared 'maximum' then we still know that
+        // any access equal to or greater than 4GiB will trap, no need to add the redzone.
+        if (uoffset >= Memory::fastMappedRedzoneBytes()) {
+            uint64_t maximum = m_info.memory.maximum() ? m_info.memory.maximum().bytes() : std::numeric_limits<uint32_t>::max();
+            m_jit.zeroExtend32ToWord(pointerLocation.asGPR(), wasmScratchGPR);
+            if (boundary)
+                m_jit.addPtr(TrustedImmPtr(boundary), wasmScratchGPR);
+            throwExceptionIf(ExceptionType::OutOfBoundsMemoryAccess, m_jit.branchPtr(RelationalCondition::AboveOrEqual, wasmScratchGPR, TrustedImmPtr(static_cast<int64_t>(maximum))));
+        }
+        break;
+    }
+    }
+
+#if CPU(ARM64)
+    if (!(static_cast<uint64_t>(uoffset) > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) || !B3::Air::Arg::isValidAddrForm(B3::Air::Move, uoffset, Width::Width128)))
+        return functor(CCallHelpers::BaseIndex(wasmBaseMemoryPointer, pointerLocation.asGPR(), CCallHelpers::TimesOne, static_cast<int32_t>(uoffset), CCallHelpers::Extend::ZExt32));
+
+    m_jit.addZeroExtend64(wasmBaseMemoryPointer, pointerLocation.asGPR(), wasmScratchGPR);
+#else
+    m_jit.zeroExtend32ToWord(pointerLocation.asGPR(), wasmScratchGPR);
+    m_jit.addPtr(wasmBaseMemoryPointer, wasmScratchGPR);
+#endif
+
+    if (static_cast<uint64_t>(uoffset) > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) || !B3::Air::Arg::isValidAddrForm(B3::Air::Move, uoffset, Width::Width128)) {
+        m_jit.addPtr(TrustedImmPtr(static_cast<int64_t>(uoffset)), wasmScratchGPR);
+        return functor(Address(wasmScratchGPR));
+    }
+    return functor(Address(wasmScratchGPR, static_cast<int32_t>(uoffset)));
+}
+
 #if CPU(X86_64)
 template<typename IntType, bool IsMod>
 void BBQJIT::emitModOrDiv(Value& lhs, Location lhsLocation, Value& rhs, Location rhsLocation, Value&, Location resultLocation)

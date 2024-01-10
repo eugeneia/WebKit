@@ -25,6 +25,7 @@
 
 #include "config.h"
 #include "WasmBBQJIT.h"
+#include "WasmBBQJIT32_64.h"
 
 #if ENABLE(WEBASSEMBLY_BBQJIT)
 #if USE(JSVALUE32_64)
