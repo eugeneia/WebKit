@@ -122,6 +122,32 @@ auto BBQJIT::emitCheckAndPrepareAndMaterializePointerApply(Value pointer, uint32
 }
 
 #if CPU(X86_64)
+RegisterSet clobbersForDivX86()
+{
+    static RegisterSet x86DivClobbers;
+    static std::once_flag flag;
+    std::call_once(
+        flag,
+        []() {
+            RegisterSetBuilder builder;
+            builder.add(X86Registers::eax, IgnoreVectors);
+            builder.add(X86Registers::edx, IgnoreVectors);
+            x86DivClobbers = builder.buildAndValidate();
+        });
+    return x86DivClobbers;
+}
+
+#define PREPARE_FOR_MOD_OR_DIV \
+do { \
+    for (JSC::Reg reg : clobbersForDivX86()) \
+        clobber(reg); \
+} while (false); \
+ScratchScope<0, 0> scratches(*this, clobbersForDivX86())
+#else
+#define PREPARE_FOR_MOD_OR_DIV
+#endif
+
+#if CPU(X86_64)
 template<typename IntType, bool IsMod>
 void BBQJIT::emitModOrDiv(Value& lhs, Location lhsLocation, Value& rhs, Location rhsLocation, Value&, Location resultLocation)
 {
@@ -403,6 +429,16 @@ void BBQJIT::emitModOrDiv(Value& lhs, Location lhsLocation, Value& rhs, Location
 }
 #endif
 
+#if CPU(X86_64)
+#define PREPARE_FOR_SHIFT \
+    do { \
+        clobber(shiftRCX); \
+    } while (false); \
+    ScratchScope<0, 0> scratches(*this, Location::fromGPR(shiftRCX))
+#else
+#define PREPARE_FOR_SHIFT
+#endif
+
 template<size_t N, typename OverflowHandler>
 void BBQJIT::emitShuffleMove(Vector<Value, N, OverflowHandler>& srcVector, Vector<Location, N, OverflowHandler>& dstVector, Vector<ShuffleStatus, N, OverflowHandler>& statusVector, unsigned index)
 {
@@ -433,6 +469,112 @@ void BBQJIT::emitShuffleMove(Vector<Value, N, OverflowHandler>& srcVector, Vecto
     }
     emitMove(srcVector[index], dst);
     statusVector[index] = ShuffleStatus::Moved;
+}
+
+template<typename Func, size_t N>
+void BBQJIT::emitCCall(Func function, const Vector<Value, N>& arguments)
+{
+    // Currently, we assume the Wasm calling convention is the same as the C calling convention
+    Vector<Type, 16> resultTypes;
+    auto argumentTypes = WTF::map<16>(arguments, [](auto& value) {
+        return Type { value.type(), 0u };
+    });
+    RefPtr<TypeDefinition> functionType = TypeInformation::typeDefinitionForFunction(resultTypes, argumentTypes);
+    CallInformation callInfo = wasmCallingConvention().callInformationFor(*functionType, CallRole::Caller);
+    Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), callInfo.headerAndArgumentStackSizeInBytes);
+    m_maxCalleeStackSize = std::max<int>(calleeStackSize, m_maxCalleeStackSize);
+
+    // Prepare wasm operation calls.
+    m_jit.prepareWasmCallOperation(GPRInfo::wasmContextInstancePointer);
+
+    // Preserve caller-saved registers and other info
+    prepareForExceptions();
+    saveValuesAcrossCallAndPassArguments(arguments, callInfo, *functionType);
+
+    // Materialize address of native function and call register
+    void* taggedFunctionPtr = tagCFunctionPtr<void*, OperationPtrTag>(function);
+    m_jit.move(TrustedImmPtr(bitwise_cast<uintptr_t>(taggedFunctionPtr)), wasmScratchGPR);
+    m_jit.call(wasmScratchGPR, OperationPtrTag);
+}
+
+template<typename Func, size_t N>
+void BBQJIT::emitCCall(Func function, const Vector<Value, N>& arguments, Value& result)
+{
+    ASSERT(result.isTemp());
+
+    // Currently, we assume the Wasm calling convention is the same as the C calling convention
+    Vector<Type, 16> resultTypes = { Type { result.type(), 0u } };
+    auto argumentTypes = WTF::map<16>(arguments, [](auto& value) {
+        return Type { value.type(), 0u };
+    });
+
+    RefPtr<TypeDefinition> functionType = TypeInformation::typeDefinitionForFunction(resultTypes, argumentTypes);
+    CallInformation callInfo = wasmCallingConvention().callInformationFor(*functionType, CallRole::Caller);
+    Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), callInfo.headerAndArgumentStackSizeInBytes);
+    m_maxCalleeStackSize = std::max<int>(calleeStackSize, m_maxCalleeStackSize);
+
+    // Prepare wasm operation calls.
+    m_jit.prepareWasmCallOperation(GPRInfo::wasmContextInstancePointer);
+
+    // Preserve caller-saved registers and other info
+    prepareForExceptions();
+    saveValuesAcrossCallAndPassArguments(arguments, callInfo, *functionType);
+
+    // Materialize address of native function and call register
+    void* taggedFunctionPtr = tagCFunctionPtr<void*, OperationPtrTag>(function);
+    m_jit.move(TrustedImmPtr(bitwise_cast<uintptr_t>(taggedFunctionPtr)), wasmScratchGPR);
+    m_jit.call(wasmScratchGPR, OperationPtrTag);
+
+    Location resultLocation;
+    switch (result.type()) {
+    case TypeKind::I32:
+    case TypeKind::I31ref:
+    case TypeKind::I64:
+    case TypeKind::Ref:
+    case TypeKind::RefNull:
+    case TypeKind::Arrayref:
+    case TypeKind::Structref:
+    case TypeKind::Funcref:
+    case TypeKind::Externref:
+    case TypeKind::Eqref:
+    case TypeKind::Anyref:
+    case TypeKind::Nullref:
+    case TypeKind::Nullfuncref:
+    case TypeKind::Nullexternref:
+    case TypeKind::Rec:
+    case TypeKind::Sub:
+    case TypeKind::Subfinal:
+    case TypeKind::Array:
+    case TypeKind::Struct:
+    case TypeKind::Func: {
+        resultLocation = Location::fromGPR(GPRInfo::returnValueGPR);
+        ASSERT(m_validGPRs.contains(GPRInfo::returnValueGPR, IgnoreVectors));
+        break;
+    }
+    case TypeKind::F32:
+    case TypeKind::F64: {
+        resultLocation = Location::fromFPR(FPRInfo::returnValueFPR);
+        ASSERT(m_validFPRs.contains(FPRInfo::returnValueFPR, Width::Width128));
+        break;
+    }
+    case TypeKind::V128: {
+        resultLocation = Location::fromFPR(FPRInfo::returnValueFPR);
+        ASSERT(m_validFPRs.contains(FPRInfo::returnValueFPR, Width::Width128));
+        break;
+    }
+    case TypeKind::Void:
+        RELEASE_ASSERT_NOT_REACHED();
+        break;
+    }
+
+    RegisterBinding currentBinding;
+    if (resultLocation.isGPR())
+        currentBinding = m_gprBindings[resultLocation.asGPR()];
+    else if (resultLocation.isFPR())
+        currentBinding = m_fprBindings[resultLocation.asFPR()];
+    RELEASE_ASSERT(!currentBinding.isScratch());
+
+    bind(result, resultLocation);
 }
 
 } } } // namespace JSC::Wasm::BBQJITImpl
