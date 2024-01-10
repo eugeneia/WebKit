@@ -633,7 +633,7 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::store(StoreOpType storeOp, Value pointe
     return { };
 }
 
-void BBQJIT::emitSanitizeAtomicResult(ExtAtomicOpType op, TypeKind resultType, Location source, Location dest)
+void BBQJIT::emitSanitizeAtomicResult32_64(ExtAtomicOpType op, TypeKind resultType, Location source, Location dest)
 {
     switch (resultType) {
     case TypeKind::I64: {
@@ -686,7 +686,7 @@ void BBQJIT::emitSanitizeAtomicResult(ExtAtomicOpType op, TypeKind resultType, L
     }
 }
 
-void BBQJIT::emitSanitizeAtomicOperand(ExtAtomicOpType op, TypeKind operandType, Location source, Location dest)
+void BBQJIT::emitSanitizeAtomicOperand32_64(ExtAtomicOpType op, TypeKind operandType, Location source, Location dest)
 {
     switch (operandType) {
     case TypeKind::I64:
@@ -893,7 +893,7 @@ Value WARN_UNUSED_RETURN BBQJIT::emitAtomicLoadOp(ExtAtomicOpType loadOp, Type v
         } else
             m_jit.move(old.asGPR(), cur.asGPR());
     });
-    emitSanitizeAtomicResult(loadOp, valueType.kind, cur, resultLocation);
+    emitSanitizeAtomicResult32_64(loadOp, valueType.kind, cur, resultLocation);
 
     return result;
 }
@@ -916,7 +916,7 @@ void BBQJIT::emitAtomicStoreOp(ExtAtomicOpType storeOp, Type, Location pointer, 
         Location valueLocation = emitMaterializeAtomicOperand(value);
         ScratchScope<1, 0> scratchSource(*this);
         source = Location::fromGPR(scratchSource.gpr(0));
-        emitSanitizeAtomicOperand(storeOp, value.type(), valueLocation, source);
+        emitSanitizeAtomicOperand32_64(storeOp, value.type(), valueLocation, source);
         ScratchScope<2, 0> scratchTmp(*this);
         old = Location::fromGPR(scratchTmp.gpr(0));
         cur = Location::fromGPR(scratchTmp.gpr(1));
@@ -926,7 +926,7 @@ void BBQJIT::emitAtomicStoreOp(ExtAtomicOpType storeOp, Type, Location pointer, 
         Location valueLocation = emitMaterializeAtomicOperand(value);
         ScratchScope<2, 0> scratchSource(*this);
         source = Location::fromGPR2(scratchSource.gpr(1), scratchSource.gpr(0));
-        emitSanitizeAtomicOperand(storeOp, value.type(), valueLocation, source);
+        emitSanitizeAtomicOperand32_64(storeOp, value.type(), valueLocation, source);
         ScratchScope<4, 0> scratchTmp(*this);
         old = Location::fromGPR2(scratchTmp.gpr(1), scratchTmp.gpr(0));
         cur = Location::fromGPR2(scratchTmp.gpr(3), scratchTmp.gpr(2));
@@ -971,7 +971,7 @@ Value BBQJIT::emitAtomicBinaryRMWOp(ExtAtomicOpType op, Type valueType, Location
             Location valueLocation = emitMaterializeAtomicOperand(value);
             ScratchScope<1, 0> scratchOperand(*this, old);
             operand = Location::fromGPR(scratchOperand.gpr(0));
-            emitSanitizeAtomicOperand(op, value.type(), valueLocation, operand);
+            emitSanitizeAtomicOperand32_64(op, value.type(), valueLocation, operand);
             ScratchScope<1, 0> scratchTmp(*this, old);
             cur = Location::fromGPR(scratchTmp.gpr(0));
             break;
@@ -982,7 +982,7 @@ Value BBQJIT::emitAtomicBinaryRMWOp(ExtAtomicOpType op, Type valueType, Location
             Location valueLocation = emitMaterializeAtomicOperand(value);
             ScratchScope<2, 0> scratchOperand(*this, old);
             operand = Location::fromGPR2(scratchOperand.gpr(1), scratchOperand.gpr(0));
-            emitSanitizeAtomicOperand(op, value.type(), valueLocation, operand);
+            emitSanitizeAtomicOperand32_64(op, value.type(), valueLocation, operand);
             ScratchScope<2, 0> scratchTmp(*this, old);
             cur = Location::fromGPR2(scratchTmp.gpr(1), scratchTmp.gpr(0));
             break;
@@ -999,7 +999,7 @@ Value BBQJIT::emitAtomicBinaryRMWOp(ExtAtomicOpType op, Type valueType, Location
             Location valueLocation = emitMaterializeAtomicOperand(value);
             ScratchScope<1, 0> scratchOperand(*this, old);
             operand = Location::fromGPR(scratchOperand.gpr(0));
-            emitSanitizeAtomicOperand(op, value.type(), valueLocation, operand);
+            emitSanitizeAtomicOperand32_64(op, value.type(), valueLocation, operand);
             ScratchScope<1, 0> scratchTmp(*this, old);
             cur = Location::fromGPR(scratchTmp.gpr(0));
             break;
@@ -1012,7 +1012,7 @@ Value BBQJIT::emitAtomicBinaryRMWOp(ExtAtomicOpType op, Type valueType, Location
             Location valueLocation = emitMaterializeAtomicOperand(value);
             ScratchScope<2, 0> scratchOperand(*this);
             operand = Location::fromGPR2(scratchOperand.gpr(1), scratchOperand.gpr(0));
-            emitSanitizeAtomicOperand(op, value.type(), valueLocation, operand);
+            emitSanitizeAtomicOperand32_64(op, value.type(), valueLocation, operand);
             ScratchScope<2, 0> scratchTmp(*this);
             cur = Location::fromGPR2(scratchTmp.gpr(1), scratchTmp.gpr(0));
             break;
@@ -1107,7 +1107,7 @@ Value BBQJIT::emitAtomicBinaryRMWOp(ExtAtomicOpType op, Type valueType, Location
             break;
         }
     });
-    emitSanitizeAtomicResult(op, valueType.kind, old, resultLocation);
+    emitSanitizeAtomicResult32_64(op, valueType.kind, old, resultLocation);
 
     return result;
 }
@@ -1137,11 +1137,11 @@ Value WARN_UNUSED_RETURN BBQJIT::emitAtomicCompareExchange(ExtAtomicOpType op, T
             Location aLocation = emitMaterializeAtomicOperand(expected);
             ScratchScope<1, 0> scratchA(*this, old);
             a = Location::fromGPR(scratchA.gpr(0));
-            emitSanitizeAtomicOperand(op, value.type(), aLocation, a);
+            emitSanitizeAtomicOperand32_64(op, value.type(), aLocation, a);
             Location bLocation = emitMaterializeAtomicOperand(value);
             ScratchScope<1, 0> scratchB(*this, old);
             b = Location::fromGPR(scratchB.gpr(0));
-            emitSanitizeAtomicOperand(op, value.type(), bLocation, b);
+            emitSanitizeAtomicOperand32_64(op, value.type(), bLocation, b);
             cur = old;
             break;
         }
@@ -1151,11 +1151,11 @@ Value WARN_UNUSED_RETURN BBQJIT::emitAtomicCompareExchange(ExtAtomicOpType op, T
             Location aLocation = emitMaterializeAtomicOperand(expected);
             ScratchScope<2, 0> scratchA(*this, old);
             a = Location::fromGPR2(scratchA.gpr(1), scratchA.gpr(0));
-            emitSanitizeAtomicOperand(op, value.type(), aLocation, a);
+            emitSanitizeAtomicOperand32_64(op, value.type(), aLocation, a);
             Location bLocation = emitMaterializeAtomicOperand(value);
             ScratchScope<2, 0> scratchB(*this, old);
             b = Location::fromGPR2(scratchB.gpr(1), scratchB.gpr(0));
-            emitSanitizeAtomicOperand(op, value.type(), bLocation, b);
+            emitSanitizeAtomicOperand32_64(op, value.type(), bLocation, b);
             cur = old;
             break;
         }
@@ -1171,11 +1171,11 @@ Value WARN_UNUSED_RETURN BBQJIT::emitAtomicCompareExchange(ExtAtomicOpType op, T
             Location aLocation = emitMaterializeAtomicOperand(expected);
             ScratchScope<1, 0> scratchA(*this, old);
             a = Location::fromGPR(scratchA.gpr(0));
-            emitSanitizeAtomicOperand(op, value.type(), aLocation, a);
+            emitSanitizeAtomicOperand32_64(op, value.type(), aLocation, a);
             Location bLocation = emitMaterializeAtomicOperand(value);
             ScratchScope<1, 0> scratchB(*this, old);
             b = Location::fromGPR(scratchB.gpr(0));
-            emitSanitizeAtomicOperand(op, value.type(), bLocation, b);
+            emitSanitizeAtomicOperand32_64(op, value.type(), bLocation, b);
             cur = old;
             break;
         }
@@ -1187,11 +1187,11 @@ Value WARN_UNUSED_RETURN BBQJIT::emitAtomicCompareExchange(ExtAtomicOpType op, T
             Location aLocation = emitMaterializeAtomicOperand(expected);
             ScratchScope<2, 0> scratchA(*this);
             a = Location::fromGPR2(scratchA.gpr(1), scratchA.gpr(0));
-            emitSanitizeAtomicOperand(op, value.type(), aLocation, a);
+            emitSanitizeAtomicOperand32_64(op, value.type(), aLocation, a);
             Location bLocation = emitMaterializeAtomicOperand(value);
             ScratchScope<2, 0> scratchB(*this);
             b = Location::fromGPR2(scratchB.gpr(1), scratchB.gpr(0));
-            emitSanitizeAtomicOperand(op, value.type(), bLocation, b);
+            emitSanitizeAtomicOperand32_64(op, value.type(), bLocation, b);
             cur = old;
             break;
         }
@@ -1206,7 +1206,7 @@ Value WARN_UNUSED_RETURN BBQJIT::emitAtomicCompareExchange(ExtAtomicOpType op, T
     JumpList failure;
 
     emitAtomicOpGeneric32_64(op, address, old, cur, [&](Location old, Location cur) {
-        emitSanitizeAtomicResult(op, valueType.kind, old, resultLocation);
+        emitSanitizeAtomicResult32_64(op, valueType.kind, old, resultLocation);
         if (old.isGPR2()) {
             failure.append(m_jit.branch32(RelationalCondition::NotEqual, old.asGPRlo(), a.asGPRlo()));
             failure.append(m_jit.branch32(RelationalCondition::NotEqual, old.asGPRhi(), a.asGPRhi()));
@@ -1217,7 +1217,7 @@ Value WARN_UNUSED_RETURN BBQJIT::emitAtomicCompareExchange(ExtAtomicOpType op, T
             m_jit.move(b.asGPR(), cur.asGPR());
         }
     });
-    emitSanitizeAtomicResult(op, valueType.kind, a, resultLocation);
+    emitSanitizeAtomicResult32_64(op, valueType.kind, a, resultLocation);
     failure.link(&m_jit);
 
     return result;

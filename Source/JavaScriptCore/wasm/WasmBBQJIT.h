@@ -63,7 +63,9 @@ public:
 
     static constexpr GPRReg wasmScratchGPR = GPRInfo::nonPreservedNonArgumentGPR0; // Scratch registers to hold temporaries in operations.
 #if USE(JSVALUE32_64)
-    static constexpr GPRReg wasmScratchGPR2 = GPRInfo::nonPreservedNonArgumentGPR1; // Scratch registers to hold temporaries in operations.
+    static constexpr GPRReg wasmScratchGPR2 = GPRInfo::nonPreservedNonArgumentGPR1;
+#else
+    static constexpr GPRReg wasmScratchGPR2 = InvalidGPRReg;
 #endif
     static constexpr FPRReg wasmScratchFPR = FPRInfo::nonPreservedNonArgumentFPR0;
 
@@ -76,6 +78,9 @@ public:
 #if USE(JSVALUE64)
     static constexpr GPRReg wasmBaseMemoryPointer = GPRInfo::wasmBaseMemoryPointer;
     static constexpr GPRReg wasmBoundsCheckingSizeRegister = GPRInfo::wasmBoundsCheckingSizeRegister;
+#else
+    static constexpr GPRReg wasmBaseMemoryPointer = InvalidGPRReg;
+    static constexpr GPRReg wasmBoundsCheckingSizeRegister = InvalidGPRReg;
 #endif
 
 public:
@@ -87,9 +92,7 @@ public:
             Fpr = 3,
             Global = 4,
             StackArgument = 5,
-#if USE(JSVALUE32_64)
             Gpr2 = 6
-#endif
         };
 
         Location()
@@ -104,9 +107,7 @@ public:
 
         static Location fromGPR(GPRReg gpr);
 
-#if USE(JSVALUE32_64)
         static Location fromGPR2(GPRReg hi, GPRReg lo);
-#endif
 
         static Location fromFPR(FPRReg fpr);
 
@@ -118,9 +119,7 @@ public:
 
         bool isGPR() const;
 
-#if USE(JSVALUE32_64)
         bool isGPR2() const;
-#endif
 
         bool isFPR() const;
 
@@ -152,11 +151,9 @@ public:
 
         FPRReg asFPR() const;
 
-#if USE(JSVALUE32_64)
         GPRReg asGPRlo() const;
 
         GPRReg asGPRhi() const;
-#endif
 
         void dump(PrintStream& out) const;
 
@@ -180,12 +177,10 @@ public:
                 Kind m_padFpr;
                 FPRReg m_fpr;
             };
-#if USE(JSVALUE32_64)
             struct {
                 Kind m_padGpr2;
                 GPRReg m_gprhi, m_gprlo;
             };
-#endif
         };
     };
 
@@ -392,22 +387,18 @@ public:
             : m_kind(None)
         { }
 
-#if USE(JSVALUE32_64)
         int32_t asI64hi() const;
 
         int32_t asI64lo() const;
-#endif
 
         void dump(PrintStream& out) const;
 
     private:
         union {
             int32_t m_i32;
-#if USE(JSVALUE32_64)
             struct {
                 int32_t lo, hi;
             } m_i32_pair;
-#endif
             int64_t m_i64;
             float m_f32;
             double m_f64;
@@ -1110,9 +1101,11 @@ public:
         return bytesForWidth(accessWidth(op));
     }
 
-    void emitSanitizeAtomicResult(ExtAtomicOpType op, TypeKind resultType, Location source, Location dest);
+    void emitSanitizeAtomicResult(ExtAtomicOpType op, TypeKind resultType, GPRReg source, GPRReg dest);
+    void emitSanitizeAtomicResult(ExtAtomicOpType op, TypeKind resultType, GPRReg result);
 
-    void emitSanitizeAtomicOperand(ExtAtomicOpType op, TypeKind operandType, Location source, Location dest);
+    void emitSanitizeAtomicResult32_64(ExtAtomicOpType op, TypeKind resultType, Location source, Location dest);
+    void emitSanitizeAtomicOperand32_64(ExtAtomicOpType op, TypeKind operandType, Location source, Location dest);
 
     Location emitMaterializeAtomicOperand(Value value);
 
@@ -1988,6 +1981,10 @@ public:
     PartialResult addSIMDBitwiseSelect(ExpressionType, ExpressionType, ExpressionType, ExpressionType&);
 
     PartialResult addSIMDRelOp(SIMDLaneOperation, SIMDInfo, ExpressionType, ExpressionType, B3::Air::Arg, ExpressionType&);
+
+    void emitVectorMul(SIMDInfo info, Location left, Location right, Location result);
+
+    PartialResult WARN_UNUSED_RETURN fixupOutOfBoundsIndicesForSwizzle(Location a, Location b, Location result);
 
     PartialResult addSIMDV_VV(SIMDLaneOperation, SIMDInfo, ExpressionType, ExpressionType, ExpressionType&);
 
