@@ -1107,6 +1107,8 @@ tools/VMInspector.cpp
 wasm/WasmB3IRGenerator.cpp
 wasm/WasmBBQDisassembler.cpp
 wasm/WasmBBQJIT.cpp @no-unify
+wasm/WasmBBQJIT32_64.cpp @no-unify
+wasm/WasmBBQJIT64.cpp @no-unify
 wasm/WasmBBQPlan.cpp
 wasm/WasmBinding.cpp
 wasm/WasmBranchHintsSectionParser.cpp
