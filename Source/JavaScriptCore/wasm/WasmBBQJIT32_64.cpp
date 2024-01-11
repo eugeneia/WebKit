@@ -3123,6 +3123,50 @@ Location BBQJIT::allocateRegister(TypeKind type)
     return Location::fromGPR(m_gprSet.isEmpty() ? evictGPR() : nextGPR());
 }
 
+PartialResult WARN_UNUSED_RETURN BBQJIT::addCallRef(const TypeDefinition& originalSignature, Vector<Value>& args, ResultList& results)
+{
+    Value callee = args.takeLast();
+    const TypeDefinition& signature = originalSignature.expand();
+    ASSERT(signature.as<FunctionSignature>()->argumentCount() == args.size());
+
+    CallInformation callInfo = wasmCallingConvention().callInformationFor(signature, CallRole::Caller);
+    Checked<int32_t> calleeStackSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), callInfo.headerAndArgumentStackSizeInBytes);
+    m_maxCalleeStackSize = std::max<int>(calleeStackSize, m_maxCalleeStackSize);
+
+    GPRReg calleePtr;
+    GPRReg calleeInstance;
+    GPRReg calleeCode;
+    GPRReg jsCalleeAnchor;
+    {
+        ScratchScope<1, 0> calleeCodeScratch(*this, RegisterSetBuilder::argumentGPRS());
+        calleeCode = calleeCodeScratch.gpr(0);
+        calleeCodeScratch.unbindPreserved();
+
+        ScratchScope<3, 0> otherScratches(*this);
+
+        Location calleeLocation;
+        if (callee.isConst()) {
+            ASSERT(callee.asI64() == JSValue::encode(jsNull()));
+            // This is going to throw anyway. It's suboptimial but probably won't happen in practice anyway.
+            emitMoveConst(callee, calleeLocation = Location::fromGPR2(otherScratches.gpr(1), otherScratches.gpr(0)));
+        } else
+            calleeLocation = loadIfNecessary(callee);
+        emitThrowOnNullReference(ExceptionType::NullReference, calleeLocation);
+
+        calleePtr = calleeLocation.asGPRlo();
+        calleeInstance = otherScratches.gpr(1);
+        jsCalleeAnchor = otherScratches.gpr(2);
+
+        m_jit.loadPtr(MacroAssembler::Address(calleePtr, WebAssemblyFunctionBase::offsetOfInstance()), jsCalleeAnchor);
+        m_jit.loadPtr(MacroAssembler::Address(calleePtr, WebAssemblyFunctionBase::offsetOfEntrypointLoadLocation()), calleeCode);
+        m_jit.loadPtr(MacroAssembler::Address(jsCalleeAnchor, JSWebAssemblyInstance::offsetOfInstance()), calleeInstance);
+
+    }
+
+    emitIndirectCall("CallRef", callee, calleeInstance, calleeCode, jsCalleeAnchor, signature, args, results, CallType::Call);
+    return { };
+}
+
 } } } // namespace JSC::Wasm::BBQJITImpl
 
 #endif // USE(JSVALUE32_64)
