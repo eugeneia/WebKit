@@ -3077,50 +3077,33 @@ void BBQJIT::emitLoad(TypeKind type, Location src, Location dst)
     }
 }
 
-void BBQJIT::setLRUKey(Location location, LocalOrTempIndex key)
+Location BBQJIT::allocateRegisterPair()
 {
-    if (location.isGPR()) {
-        m_gprLRU.increaseKey(location.asGPR(), key);
-    } else if (location.isFPR()) {
-        m_fprLRU.increaseKey(location.asFPR(), key);
-    } else if (location.isGPR2()) {
-        m_gprLRU.increaseKey(location.asGPRhi(), key);
-        m_gprLRU.increaseKey(location.asGPRlo(), key);
-    }
-}
+    GPRReg hi, lo;
 
-Location BBQJIT::allocateRegister(TypeKind type)
-{
-    if (isFloatingPointType(type))
-        return Location::fromFPR(m_fprSet.isEmpty() ? evictFPR() : nextFPR());
-    if (typeNeedsGPR2(type)) {
-        GPRReg hi, lo;
+    do {
+        // we loop here until we can get _two_ register from m_gprSet
+        // this wouldn't be necessary except that evictGPR modifies m_gprSet and nextGPR _doesn't_
 
-        do {
-            // we loop here until we can get _two_ register from m_gprSet
-            // this wouldn't be necessary except that evictGPR modifies m_gprSet and nextGPR _doesn't_
+        if (m_gprSet.isEmpty()) {
+            evictGPR();
+            continue;
+        }
 
-            if (m_gprSet.isEmpty()) {
-                evictGPR();
-                continue;
-            }
+        auto iter = m_gprSet.begin();
+        ASSERT(iter != m_gprSet.end());
+        hi = (*iter).gpr();
+        ++iter;
+        if (iter == m_gprSet.end()) {
+            m_gprLRU.lock(hi);
+            evictGPR();
+            m_gprLRU.unlock(hi);
+            continue;
+        }
+        lo = (*iter).gpr();
 
-            auto iter = m_gprSet.begin();
-            ASSERT(iter != m_gprSet.end());
-            hi = (*iter).gpr();
-            ++iter;
-            if (iter == m_gprSet.end()) {
-                m_gprLRU.lock(hi);
-                evictGPR();
-                m_gprLRU.unlock(hi);
-                continue;
-            }
-            lo = (*iter).gpr();
-
-            return Location::fromGPR2(hi, lo);
-        } while (1);
-    }
-    return Location::fromGPR(m_gprSet.isEmpty() ? evictGPR() : nextGPR());
+        return Location::fromGPR2(hi, lo);
+    } while (1);
 }
 
 PartialResult WARN_UNUSED_RETURN BBQJIT::addCallRef(const TypeDefinition& originalSignature, Vector<Value>& args, ResultList& results)

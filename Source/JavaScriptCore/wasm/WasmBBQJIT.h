@@ -1877,6 +1877,8 @@ private:
 
     Location allocateRegister(TypeKind type);
 
+    Location allocateRegisterPair();
+
     Location allocateRegister(Value value);
 
     Location bind(Value value, Location loc);

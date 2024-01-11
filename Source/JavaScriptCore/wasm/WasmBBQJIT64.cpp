@@ -4137,19 +4137,9 @@ void BBQJIT::emitLoad(TypeKind type, Location src, Location dst)
     }
 }
 
-void BBQJIT::setLRUKey(Location location, LocalOrTempIndex key)
+Location BBQJIT::allocateRegisterPair()
 {
-    if (location.isGPR())
-        m_gprLRU.increaseKey(location.asGPR(), key);
-    else if (location.isFPR())
-        m_fprLRU.increaseKey(location.asFPR(), key);
-}
-
-Location BBQJIT::allocateRegister(TypeKind type)
-{
-    if (isFloatingPointType(type))
-        return Location::fromFPR(m_fprSet.isEmpty() ? evictFPR() : nextFPR());
-    return Location::fromGPR(m_gprSet.isEmpty() ? evictGPR() : nextGPR());
+    RELEASE_ASSERT_NOT_REACHED();
 }
 
 PartialResult WARN_UNUSED_RETURN BBQJIT::addCallRef(const TypeDefinition& originalSignature, Vector<Value>& args, ResultList& results)

@@ -4278,6 +4278,18 @@ ControlData& BBQJIT::currentControlData()
     return m_parser->controlStack().last().controlData;
 }
 
+void BBQJIT::setLRUKey(Location location, LocalOrTempIndex key)
+{
+    if (location.isGPR()) {
+        m_gprLRU.increaseKey(location.asGPR(), key);
+    } else if (location.isFPR()) {
+        m_fprLRU.increaseKey(location.asFPR(), key);
+    } else if (location.isGPR2()) {
+        m_gprLRU.increaseKey(location.asGPRhi(), key);
+        m_gprLRU.increaseKey(location.asGPRlo(), key);
+    }
+}
+
 void BBQJIT::increaseKey(Location location)
 {
     setLRUKey(location, m_lastUseTimestamp ++);
@@ -4384,6 +4396,15 @@ void BBQJIT::consume(Value value)
     Location location = locationOf(value);
     if (value.isTemp() && location != canonicalSlot(value))
         unbind(value, location);
+}
+
+Location BBQJIT::allocateRegister(TypeKind type)
+{
+    if (isFloatingPointType(type))
+        return Location::fromFPR(m_fprSet.isEmpty() ? evictFPR() : nextFPR());
+    if (typeNeedsGPR2(type))
+        return allocateRegisterPair();
+    return Location::fromGPR(m_gprSet.isEmpty() ? evictGPR() : nextGPR());
 }
 
 Location BBQJIT::allocateRegister(Value value)
