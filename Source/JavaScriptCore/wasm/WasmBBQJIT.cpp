@@ -118,28 +118,6 @@ Location Location::fromGlobal(int32_t globalOffset)
     return loc;
 }
 
-Location Location::fromArgumentLocation(ArgumentLocation argLocation, TypeKind type)
-{
-    switch (argLocation.location.kind()) {
-    case ValueLocation::Kind::GPRRegister:
-#if USE(JSVALUE64)
-        UNUSED_PARAM(type);
-        return Location::fromGPR(argLocation.location.jsr().gpr());
-#else
-        if (typeNeedsGPR2(type))
-            return Location::fromGPR2(argLocation.location.jsr().tagGPR(), argLocation.location.jsr().payloadGPR());
-        return Location::fromGPR(argLocation.location.jsr().payloadGPR());
-#endif
-    case ValueLocation::Kind::FPRRegister:
-        return Location::fromFPR(argLocation.location.fpr());
-    case ValueLocation::Kind::StackArgument:
-        return Location::fromStackArgument(argLocation.location.offsetFromSP());
-    case ValueLocation::Kind::Stack:
-        return Location::fromStack(argLocation.location.offsetFromFP());
-    }
-    RELEASE_ASSERT_NOT_REACHED();
-}
-
 bool Location::isNone() const
 {
     return m_kind == None;
@@ -275,11 +253,9 @@ void Location::dump(PrintStream& out) const
     case StackArgument:
         out.print("StackArgument(", m_offset, ")");
         break;
-#if USE(JSVALUE32_64)
     case Gpr2:
         out.print("GPR2(", m_gprhi, ",", m_gprlo, ")");
         break;
-#endif
     }
 }
 
@@ -290,10 +266,8 @@ bool Location::operator==(Location other) const
     switch (m_kind) {
     case Gpr:
         return m_gpr == other.m_gpr;
-#if USE(JSVALUE32_64)
     case Gpr2:
         return m_gprlo == other.m_gprlo && m_gprhi == other.m_gprhi;
-#endif
     case Fpr:
         return m_fpr == other.m_fpr;
     case Stack:

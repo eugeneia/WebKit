@@ -71,6 +71,23 @@
 
 namespace JSC { namespace Wasm { namespace BBQJITImpl {
 
+Location Location::fromArgumentLocation(ArgumentLocation argLocation, TypeKind type)
+{
+    switch (argLocation.location.kind()) {
+    case ValueLocation::Kind::GPRRegister:
+        if (typeNeedsGPR2(type))
+            return Location::fromGPR2(argLocation.location.jsr().tagGPR(), argLocation.location.jsr().payloadGPR());
+        return Location::fromGPR(argLocation.location.jsr().payloadGPR());
+    case ValueLocation::Kind::FPRRegister:
+        return Location::fromFPR(argLocation.location.fpr());
+    case ValueLocation::Kind::StackArgument:
+        return Location::fromStackArgument(argLocation.location.offsetFromSP());
+    case ValueLocation::Kind::Stack:
+        return Location::fromStack(argLocation.location.offsetFromFP());
+    }
+    RELEASE_ASSERT_NOT_REACHED();
+}
+
 Location Location::fromGPR2(GPRReg hi, GPRReg lo)
 {
     ASSERT(hi != lo);
