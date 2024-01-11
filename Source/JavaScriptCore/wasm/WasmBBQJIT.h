@@ -1921,11 +1921,7 @@ private:
                     bindFPRToScratch(reg.fpr());
             }
             for (int i = 0; i < GPRs; i ++)
-#if CPU(X86_64) || CPU(ARM64)
-                m_tempGPRs[i] = bindGPRToScratch(m_generator.allocateRegister(TypeKind::I64).asGPR());
-#else
-                m_tempGPRs[i] = bindGPRToScratch(m_generator.allocateRegister(TypeKind::I32).asGPR());
-#endif
+                m_tempGPRs[i] = bindGPRToScratch(m_generator.allocateRegister(is64Bit() ? TypeKind::I64 : TypeKind::I32).asGPR());
             for (int i = 0; i < FPRs; i ++)
                 m_tempFPRs[i] = bindFPRToScratch(m_generator.allocateRegister(TypeKind::F64).asFPR());
         }
@@ -2057,12 +2053,10 @@ private:
                 m_preserved.add(location.asGPR(), IgnoreVectors);
             else if (location.isFPR())
                 m_preserved.add(location.asFPR(), Width::Width128);
-#if USE(JSVALUE32_64)
             else if (location.isGPR2()) {
                 m_preserved.add(location.asGPRlo(), IgnoreVectors);
                 m_preserved.add(location.asGPRhi(), IgnoreVectors);
             }
-#endif
             initializedPreservedSet(args...);
         }
 
@@ -2095,14 +2089,15 @@ private:
 
     constexpr static int tempSlotSize = 16; // Size of the stack slot for a stack temporary. Currently the size of the largest possible temporary (a v128).
 
-#if USE(JSVALUE32_64)
-    enum ShiftI64Helper32Op { Lshift, Urshift, Rshift };
-    void shiftI64Helper32(ShiftI64Helper32Op op, Location lhsLocation, Location rhsLocation, Location resultLocation);
-    enum class RotI64Helper32Op { Left, Right };
-    void rotI64Helper32(RotI64Helper32Op op, Location lhsLocation, Location rhsLocation, Location resultLocation);
-    void compareI64Helper32(RelationalCondition condition, Location lhsLocation, Location rhsLocation, Location resultLocation);
-    void F64CopysignHelper32(Location lhsLocation, Location rhsLocation, Location resultLocation);
-#endif
+    enum class ShiftI64HelperOp { Lshift, Urshift, Rshift };
+    void shiftI64Helper(ShiftI64HelperOp op, Location lhsLocation, Location rhsLocation, Location resultLocation);
+
+    enum class RotI64HelperOp { Left, Right };
+    void rotI64Helper(RotI64HelperOp op, Location lhsLocation, Location rhsLocation, Location resultLocation);
+
+    void compareI64Helper(RelationalCondition condition, Location lhsLocation, Location rhsLocation, Location resultLocation);
+
+    void F64CopysignHelper(Location lhsLocation, Location rhsLocation, Location resultLocation);
 
     CCallHelpers& m_jit;
     BBQCallee& m_callee;

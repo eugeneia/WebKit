@@ -150,6 +150,11 @@ bool Location::isGPR() const
     return m_kind == Gpr;
 }
 
+bool Location::isGPR2() const
+{
+    return m_kind == Gpr2;
+}
+
 bool Location::isFPR() const
 {
     return m_kind == Fpr;
@@ -235,6 +240,18 @@ FPRReg Location::asFPR() const
 {
     ASSERT(isFPR());
     return m_fpr;
+}
+
+GPRReg Location::asGPRlo() const
+{
+    ASSERT(isGPR2());
+    return m_gprlo;
+}
+
+GPRReg Location::asGPRhi() const
+{
+    ASSERT(isGPR2());
+    return m_gprhi;
 }
 
 void Location::dump(PrintStream& out) const
