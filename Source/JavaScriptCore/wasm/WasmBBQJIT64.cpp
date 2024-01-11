@@ -91,6 +91,11 @@ bool Location::isRegister() const
     return isGPR() || isFPR();
 }
 
+bool BBQJIT::typeNeedsGPR2(TypeKind)
+{
+    return false;
+}
+
 uint32_t BBQJIT::sizeOfType(TypeKind type)
 {
     switch (type) {

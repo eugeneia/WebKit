@@ -3107,7 +3107,7 @@ MacroAssembler::Label BBQJIT::addLoopOSREntrypoint()
 
     int frameSize = m_frameSize + m_maxCalleeStackSize;
     int roundedFrameSize = WTF::roundUpToMultipleOf(stackAlignmentBytes(), frameSize);
-#if USE(JSVALUE64)
+#if CPU(X86_64) || CPU(ARM64)
     m_jit.subPtr(GPRInfo::callFrameRegister, TrustedImm32(roundedFrameSize), MacroAssembler::stackPointerRegister);
 #else
     m_jit.subPtr(GPRInfo::callFrameRegister, TrustedImm32(roundedFrameSize), wasmScratchGPR);
@@ -3884,10 +3884,8 @@ void BBQJIT::saveValuesAcrossCallAndPassArguments(const Vector<Value, N>& argume
                 binding = m_gprBindings[paramLocation.asGPR()];
             else if (paramLocation.isFPR())
                 binding = m_fprBindings[paramLocation.asFPR()];
-#if USE(JSVALUE32_64)
             else if (paramLocation.isGPR2())
                 binding = m_gprBindings[paramLocation.asGPRhi()];
-#endif
             if (!binding.toValue().isNone())
                 flushValue(binding.toValue());
         }
@@ -3924,10 +3922,8 @@ void BBQJIT::returnValuesFromCall(Vector<Value, N>& results, const FunctionSigna
                 currentBinding = m_gprBindings[returnLocation.asGPR()];
             else if (returnLocation.isFPR())
                 currentBinding = m_fprBindings[returnLocation.asFPR()];
-#if USE(JSVALUE32_64)
             else if (returnLocation.isGPR2())
                 currentBinding = m_gprBindings[returnLocation.asGPRhi()];
-#endif
             if (currentBinding.isScratch()) {
                 // FIXME: This is a total hack and could cause problems. We assume scratch registers (allocated by a ScratchScope)
                 // will never be live across a call. So far, this is probably true, but it's fragile. Probably the fix here is to
@@ -3936,13 +3932,11 @@ void BBQJIT::returnValuesFromCall(Vector<Value, N>& results, const FunctionSigna
                 if (returnLocation.isGPR()) {
                     ASSERT(m_validGPRs.contains(returnLocation.asGPR(), IgnoreVectors));
                     m_gprSet.add(returnLocation.asGPR(), IgnoreVectors);
-#if USE(JSVALUE32_64)
                 } else if (returnLocation.isGPR2()) {
                     ASSERT(m_validGPRs.contains(returnLocation.asGPRlo(), IgnoreVectors));
                     ASSERT(m_validGPRs.contains(returnLocation.asGPRhi(), IgnoreVectors));
                     m_gprSet.add(returnLocation.asGPRlo(), IgnoreVectors);
                     m_gprSet.add(returnLocation.asGPRhi(), IgnoreVectors);
-#endif
                 } else {
                     ASSERT(m_validFPRs.contains(returnLocation.asFPR(), Width::Width128));
                     m_fprSet.add(returnLocation.asFPR(), Width::Width128);
@@ -4383,10 +4377,8 @@ Location BBQJIT::allocateWithHint(Value value, Location hint)
     if (reg.kind() == Location::None
         || value.isFloat() != reg.isFPR()
         || (reg.isGPR() && !m_gprSet.contains(reg.asGPR(), IgnoreVectors))
-#if USE(JSVALUE32_64)
         || (reg.isGPR2() && !typeNeedsGPR2(value.type()))
         || (reg.isGPR() && typeNeedsGPR2(value.type()))
-#endif
         || (reg.isFPR() && !m_fprSet.contains(reg.asFPR(), Width::Width128)))
         reg = allocateRegister(value);
     increaseKey(reg);
@@ -4481,7 +4473,6 @@ Location BBQJIT::bind(Value value, Location loc)
             ASSERT(m_fprSet.contains(loc.asFPR(), Width::Width128));
             m_fprSet.remove(loc.asFPR());
             m_fprBindings[loc.asFPR()] = RegisterBinding::fromValue(value);
-#if USE(JSVALUE32_64)
         } else if (loc.isGPR2()) {
             ASSERT(m_gprBindings[loc.asGPRlo()].isNone());
             ASSERT(m_gprBindings[loc.asGPRhi()].isNone());
@@ -4492,7 +4483,6 @@ Location BBQJIT::bind(Value value, Location loc)
             auto binding = RegisterBinding::fromValue(value);
             m_gprBindings[loc.asGPRlo()] = binding;
             m_gprBindings[loc.asGPRhi()] = binding;
-#endif
         } else {
             ASSERT(m_gprSet.contains(loc.asGPR(), IgnoreVectors));
             m_gprSet.remove(loc.asGPR());
@@ -4525,13 +4515,11 @@ void BBQJIT::unbind(Value value, Location loc)
         ASSERT(m_validGPRs.contains(loc.asGPR(), IgnoreVectors));
         m_gprSet.add(loc.asGPR(), IgnoreVectors);
         m_gprBindings[loc.asGPR()] = RegisterBinding::none();
-#if USE(JSVALUE32_64)
     } else if (loc.isGPR2()) {
         m_gprSet.add(loc.asGPRlo(), IgnoreVectors);
         m_gprSet.add(loc.asGPRhi(), IgnoreVectors);
         m_gprBindings[loc.asGPRlo()] = RegisterBinding::none();
         m_gprBindings[loc.asGPRhi()] = RegisterBinding::none();
-#endif
     }
     if (value.isLocal())
         m_locals[value.asLocal()] = m_localSlots[value.asLocal()];
