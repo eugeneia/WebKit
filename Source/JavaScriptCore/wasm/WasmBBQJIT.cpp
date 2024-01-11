@@ -2151,16 +2151,6 @@ PartialResult WARN_UNUSED_RETURN BBQJIT::addI32Or(Value lhs, Value rhs, Value& r
     );
 }
 
-#if CPU(X86_64)
-#define PREPARE_FOR_SHIFT \
-do { \
-    clobber(shiftRCX); \
-} while (false); \
-ScratchScope<0, 0> scratches(*this, Location::fromGPR(shiftRCX))
-#else
-#define PREPARE_FOR_SHIFT
-#endif
-
 void BBQJIT::moveShiftAmountIfNecessary(Location& rhsLocation)
 {
     if constexpr (isX86()) {
