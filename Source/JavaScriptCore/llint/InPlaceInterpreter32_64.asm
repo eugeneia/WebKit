@@ -7,12 +7,10 @@
 macro saveIPIntRegisters()
     subp IPIntCalleeSaveSpaceStackAligned, sp
     store2ia PM, PB, -8[cfr]
-    storep wasmInstance, -16[cfr]
 end
 
 macro restoreIPIntRegisters()
     load2ia -8[cfr], PM, PB
-    loadp -16[cfr], wasmInstance
     addp IPIntCalleeSaveSpaceStackAligned, sp
 end
 
@@ -39,16 +37,44 @@ end
 # Stack operations
 # Every value on the stack is always 16 bytes! This makes life easy.
 
-macro pushQuad(reg)
-    break
+macro pushQuad(hi, lo)
+    if ARMv7
+        subp 16, sp
+        store2ia lo, hi, [sp]
+    else
+        break
+    end
+end
+
+macro pushDouble(reg)
+    if ARMv7
+        subp 16, sp
+        storei reg, [sp]
+    else
+        break
+    end
 end
 
 macro pushQuadPair(reg1, reg2)
     break
 end
 
-macro popQuad(reg, scratch)
-    break
+macro popQuad(hi, lo)
+    if ARMv7
+        load2ia [sp], lo, hi
+        addp 16, sp
+    else
+        break
+    end
+end
+
+macro popDouble(reg)
+    if ARMv7
+        loadi [sp], reg
+        addp 16, sp
+    else
+        break
+    end
 end
 
 macro pushVectorReg0()
@@ -95,11 +121,11 @@ end
 # Typed push/pop to make code pretty
 
 macro pushInt32(reg)
-    break
+    pushDouble(reg)
 end
 
 macro popInt32(reg)
-    break
+    popDouble(reg)
 end
 
 macro pushInt64(reg)
@@ -154,7 +180,8 @@ end
 macro argumINTEnd()
     # zero out remaining locals
     bpeq argumINTDest, t6, .ipint_entry_finish_zero
-    break
+    store2ia 0, 0, [argumINTDest]
+    addp 8, argumINTDest
 end
 
 macro argumINTFinish()
@@ -165,9 +192,18 @@ end
     # 0x00 - 0x11: control flow #
     #############################
 
-unimplementedInstruction(_unreachable)
+instructionLabel(_unreachable)
+    # unreachable
+    ipintException(Unreachable)
+
 unimplementedInstruction(_nop)
-unimplementedInstruction(_block)
+
+instructionLabel(_block)
+    # block
+    loadi [PM, MC], PC
+    loadi 4[PM, MC], MC
+    nextIPIntInstruction()
+
 unimplementedInstruction(_loop)
 unimplementedInstruction(_if)
 unimplementedInstruction(_else)
@@ -176,7 +212,6 @@ unimplementedInstruction(_catch)
 unimplementedInstruction(_throw)
 unimplementedInstruction(_rethrow)
 reservedOpcode(0xa)
-
 
 macro uintDispatch()
     loadb [PM], t6
@@ -228,7 +263,18 @@ reservedOpcode(0x1f)
     # 0x20 - 0x26: get and set values #
     ###################################
 
-unimplementedInstruction(_local_get)
+instructionLabel(_local_get)
+    # local.get
+    loadb 1[PB, PC], t0
+    advancePC(2)
+    bbaeq t0, 128, _ipint_local_get_slow_path
+.ipint_local_get_post_decode:
+    # Index into locals
+    load2ia [PL, t0, LocalSize], t0, t1
+    # Push to stack
+    pushQuad(t1, t0)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_local_set)
 unimplementedInstruction(_local_tee)
 unimplementedInstruction(_global_get)
@@ -260,7 +306,14 @@ unimplementedInstruction(_i64_store8_mem)
 unimplementedInstruction(_i64_store16_mem)
 unimplementedInstruction(_i64_store32_mem)
 unimplementedInstruction(_memory_size)
-unimplementedInstruction(_memory_grow)
+
+instructionLabel(_memory_grow)
+    popInt32(a1)
+    operationCall(macro() cCall2(_ipint_extern_memory_grow) end)
+    pushInt32(r0)
+    ipintReloadMemory()
+    advancePC(2)
+    nextIPIntInstruction()
 
     ################################
     # 0x41 - 0x44: constant values #
@@ -275,17 +328,103 @@ unimplementedInstruction(_f64_const)
     # 0x45 - 0x4f: i32 comparison #
     ###############################
 
-unimplementedInstruction(_i32_eqz)
-unimplementedInstruction(_i32_eq)
-unimplementedInstruction(_i32_ne)
-unimplementedInstruction(_i32_lt_s)
-unimplementedInstruction(_i32_lt_u)
-unimplementedInstruction(_i32_gt_s)
-unimplementedInstruction(_i32_gt_u)
-unimplementedInstruction(_i32_le_s)
-unimplementedInstruction(_i32_le_u)
-unimplementedInstruction(_i32_ge_s)
-unimplementedInstruction(_i32_ge_u)
+instructionLabel(_i32_eqz)
+    # i32.eqz
+    popInt32(t0)
+    cieq t0, 0, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_eq)
+    # i32.eq
+    popInt32(t1)
+    popInt32(t0)
+    cieq t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_ne)
+    # i32.ne
+    popInt32(t1)
+    popInt32(t0)
+    cineq t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_lt_s)
+    # i32.lt_s
+    popInt32(t1)
+    popInt32(t0)
+    cilt t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_lt_u)
+    # i32.lt_u
+    popInt32(t1)
+    popInt32(t0)
+    cib t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_gt_s)
+    # i32.gt_s
+    popInt32(t1)
+    popInt32(t0)
+    cigt t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_gt_u)
+    # i32.gt_u
+    popInt32(t1)
+    popInt32(t0)
+    cia t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_le_s)
+    # i32.le_s
+    popInt32(t1)
+    popInt32(t0)
+    cilteq t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_le_u)
+    # i32.le_u
+    popInt32(t1)
+    popInt32(t0)
+    cibeq t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_ge_s)
+    # i32.ge_s
+    popInt32(t1)
+    popInt32(t0)
+    cigteq t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_ge_u)
+    # i32.ge_u
+    popInt32(t1)
+    popInt32(t0)
+    ciaeq t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
 
     ###############################
     # 0x50 - 0x5a: i64 comparison #
@@ -329,24 +468,215 @@ unimplementedInstruction(_f64_ge)
     # 0x67 - 0x78: i32 operations #
     ###############################
 
-unimplementedInstruction(_i32_clz)
-unimplementedInstruction(_i32_ctz)
-unimplementedInstruction(_i32_popcnt)
-unimplementedInstruction(_i32_add)
-unimplementedInstruction(_i32_sub)
-unimplementedInstruction(_i32_mul)
-unimplementedInstruction(_i32_div_s)
-unimplementedInstruction(_i32_div_u)
-unimplementedInstruction(_i32_rem_s)
-unimplementedInstruction(_i32_rem_u)
-unimplementedInstruction(_i32_and)
-unimplementedInstruction(_i32_or)
-unimplementedInstruction(_i32_xor)
-unimplementedInstruction(_i32_shl)
-unimplementedInstruction(_i32_shr_s)
-unimplementedInstruction(_i32_shr_u)
-unimplementedInstruction(_i32_rotl)
-unimplementedInstruction(_i32_rotr)
+instructionLabel(_i32_clz)
+    # i32.clz
+    popInt32(t0)
+    lzcnti t0, t1
+    pushInt32(t1)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_ctz)
+    # i32.ctz
+    popInt32(t0)
+    tzcnti t0, t1
+    pushInt32(t1)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_popcnt)
+    # i32.popcnt
+    popInt32(t1)
+    operationCall(macro() cCall2(_slow_path_wasm_popcount) end)
+    pushInt32(r1)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_add)
+    # i32.add
+    popInt32(t1)
+    popInt32(t0)
+    addi t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_sub)
+    # i32.sub
+    popInt32(t1)
+    popInt32(t0)
+    subi t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_mul)
+    # i32.mul
+    popInt32(t1)
+    popInt32(t0)
+    muli t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_div_s)
+    # i32.div_s
+    popInt32(t1)
+    popInt32(t0)
+    btiz t1, .ipint_i32_div_s_throwDivisionByZero
+
+    bineq t1, -1, .ipint_i32_div_s_safe
+    bieq t0, constexpr INT32_MIN, .ipint_i32_div_s_throwIntegerOverflow
+
+.ipint_i32_div_s_safe:
+    functionCall(macro () cCall2(_i32_div_s) end)
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_i32_div_s_throwDivisionByZero:
+    ipintException(DivisionByZero)
+
+.ipint_i32_div_s_throwIntegerOverflow:
+    ipintException(IntegerOverflow)
+
+instructionLabel(_i32_div_u)
+    # i32.div_u
+    popInt32(t1)
+    popInt32(t0)
+    btiz t1, .ipint_i32_div_u_throwDivisionByZero
+
+    functionCall(macro () cCall2(_i32_div_u) end)
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_i32_div_u_throwDivisionByZero:
+    ipintException(DivisionByZero)
+
+instructionLabel(_i32_rem_s)
+    # i32.rem_s
+    popInt32(t1)
+    popInt32(t0)
+
+    btiz t1, .ipint_i32_rem_s_throwDivisionByZero
+
+    bineq t1, -1, .ipint_i32_rem_s_safe
+    bineq t0, constexpr INT32_MIN, .ipint_i32_rem_s_safe
+
+    move 0, t0
+    jmp .ipint_i32_rem_s_return
+
+.ipint_i32_rem_s_safe:
+    functionCall(macro () cCall2(_i32_rem_s) end)
+
+.ipint_i32_rem_s_return:
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_i32_rem_s_throwDivisionByZero:
+    ipintException(DivisionByZero)
+
+instructionLabel(_i32_rem_u)
+    # i32.rem_u
+    popInt32(t1)
+    popInt32(t0)
+    btiz t1, .ipint_i32_rem_u_throwDivisionByZero
+
+    functionCall(macro () cCall2(_i32_rem_u) end)
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_i32_rem_u_throwDivisionByZero:
+    ipintException(DivisionByZero)
+
+instructionLabel(_i32_and)
+    # i32.and
+    popInt32(t1)
+    popInt32(t0)
+    andi t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_or)
+    # i32.or
+    popInt32(t1)
+    popInt32(t0)
+    ori t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_xor)
+    # i32.xor
+    popInt32(t1)
+    popInt32(t0)
+    xori t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_shl)
+    # i32.shl
+    popInt32(t1)
+    popInt32(t0)
+    lshifti t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_shr_s)
+    # i32.shr_s
+    popInt32(t1)
+    popInt32(t0)
+    rshifti t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_shr_u)
+    # i32.shr_u
+    popInt32(t1)
+    popInt32(t0)
+    urshifti t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_rotl)
+    # i32.rotl
+    popInt32(t1)
+    popInt32(t0)
+    lrotatei t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_rotr)
+    # i32.rotr
+    popInt32(t1)
+    popInt32(t0)
+    rrotatei t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
 
     ###############################
     # 0x79 - 0x8a: i64 operations #
@@ -438,8 +768,23 @@ unimplementedInstruction(_i32_reinterpret_f32)
 unimplementedInstruction(_i64_reinterpret_f64)
 unimplementedInstruction(_f32_reinterpret_i32)
 unimplementedInstruction(_f64_reinterpret_i64)
-unimplementedInstruction(_i32_extend8_s)
-unimplementedInstruction(_i32_extend16_s)
+
+instructionLabel(_i32_extend8_s)
+    # i32.extend8_s
+    popInt32(t0)
+    sxb2i t0, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_extend16_s)
+    # i32.extend8_s
+    popInt32(t0)
+    sxh2i t0, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_i64_extend8_s)
 unimplementedInstruction(_i64_extend16_s)
 unimplementedInstruction(_i64_extend32_s)
@@ -955,8 +1300,6 @@ slowPathLabel(_local_set)
 slowPathLabel(_local_tee)
     break
 
-    break
-
 mintAlign(_a0)
 _mint_begin:
     break
@@ -1051,7 +1394,8 @@ mintAlign(_end)
 
 uintAlign(_r0)
 _uint_begin:
-    break
+    popQuad(r1, r0)
+    uintDispatch()
 
 uintAlign(_r1)
     break
@@ -1077,13 +1421,19 @@ uintAlign(_ret)
 
 argumINTAlign(_a0)
 _argumINT_begin:
-    break
+    storei a0, [argumINTDest]
+    storei a1, 4[argumINTDest]
+    addp 8, argumINTDest
+    argumINTDispatch()
 
 argumINTAlign(_a1)
     break
 
 argumINTAlign(_a2)
-    break
+    storei a2, [argumINTDest]
+    storei a3, 4[argumINTDest]
+    addp 8, argumINTDest
+    argumINTDispatch()
 
 argumINTAlign(_a3)
     break
