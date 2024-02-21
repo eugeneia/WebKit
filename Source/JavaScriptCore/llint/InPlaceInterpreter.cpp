@@ -99,6 +99,8 @@ void initialize()
         // This is the label representing the farthest possible dispatch jump
         VALIDATE_JS_TO_WASM_WRAPPER_ENTRY(static_cast<int>(Wasm::JSEntrypointInterpreterCalleeMetadata::OpcodeMask) + 1, afterops);
     }
+#elif !ENABLE(C_LOOP) && CPU(ARM)
+    // XXX
 #else
     RELEASE_ASSERT_NOT_REACHED("IPInt only supports ARM64 and X86_64 (for now).");
 #endif
