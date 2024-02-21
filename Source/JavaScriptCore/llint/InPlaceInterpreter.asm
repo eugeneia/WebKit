@@ -124,7 +124,6 @@ macro saveIPIntRegisters()
         storep wasmInstance, -0x18[cfr]
     elsif ARMv7
         store2ia PM, PB, -8[cfr]
-        storep wasmInstance, -16[cfr]
     else
         error
     end
@@ -140,7 +139,6 @@ macro restoreIPIntRegisters()
         loadp -0x18[cfr], wasmInstance
     elsif ARMv7
         load2ia -8[cfr], PM, PB
-        loadp -16[cfr], wasmInstance
     else
         error
     end
@@ -219,6 +217,24 @@ macro pushQuad(reg)
     end
 end
 
+macro pushDoublePair(hi, lo)
+    if ARMv7
+        subp 16, sp
+        store2ia lo, hi, [sp]
+    else
+        break
+    end
+end
+
+macro pushDouble(reg)
+    if ARMv7
+        subp 16, sp
+        storei reg, [sp]
+    else
+        break
+    end
+end
+
 macro pushQuadPair(reg1, reg2)
     push reg1, reg2
 end
@@ -228,6 +244,24 @@ macro popQuad(reg, scratch)
         pop reg, scratch
     elsif X86_64
         pop reg
+    else
+        break
+    end
+end
+
+macro popDoublePair(hi, lo)
+    if ARMv7
+        load2ia [sp], lo, hi
+        addp 16, sp
+    else
+        break
+    end
+end
+
+macro popDouble(reg)
+    if ARMv7
+        loadi [sp], reg
+        addp 16, sp
     else
         break
     end
@@ -351,11 +385,19 @@ end
 # Typed push/pop to make code pretty
 
 macro pushInt32(reg)
-    pushQuad(reg)
+    if JSVALUE64
+        pushQuad(reg)
+    else
+        pushDouble(reg)
+    end
 end
 
 macro popInt32(reg, scratch)
-    popQuad(reg, scratch)
+    if JSVALUE64
+        popQuad(reg, scratch)
+    else
+        popDouble(reg)
+    end
 end
 
 macro pushInt64(reg)
@@ -441,8 +483,23 @@ end
 
 # Operation Calls
 
+macro functionCall(fn)
+    push PC, MC
+    push PL, ws0
+    fn()
+    pop ws0, PL
+    pop MC, PC
+    if ARM64 or ARM64E
+        pcrtoaddr _ipint_unreachable, IB
+    end
+end
+
 macro operationCall(fn)
-    move wasmInstance, a0
+    if ARMv7
+        loadp CodeBlock[cfr], a0
+    else
+        move wasmInstance, a0
+    end
     push PC, MC
     push PL, ws0
     fn()
@@ -456,7 +513,11 @@ end
 macro operationCallMayThrow(fn)
     storei PC, CallSiteIndex[cfr]
 
-    move wasmInstance, a0
+    if ARMv7
+        loadp CodeBlock[cfr], a0
+    else
+        move wasmInstance, a0
+    end
     push PC, MC
     push PL, ws0
     fn()
@@ -474,6 +535,9 @@ end
 # Exception handling
 
 macro ipintException(exception)
+    if ARMv7
+        loadp CodeBlock[cfr], wasmInstance
+    end
     storei constexpr Wasm::ExceptionType::%exception%, ArgumentCountIncludingThis + PayloadOffset[cfr]
     jmp _wasm_throw_from_slow_path_trampoline
 end
@@ -768,7 +832,7 @@ macro argumINTDispatch()
     loadb [PM], csr1
     addp 1, PM
     lshiftp 6, csr1
-    leap (_argumINT_a0 + 1), t7
+    leap (_argumINT_begin + 1), t7
     addp csr1, t7
     emit "bx r9"
 end
@@ -776,7 +840,8 @@ end
 macro argumINTEnd()
     # zero out remaining locals
     bpeq argumINTDest, t6, .ipint_entry_finish_zero
-    break
+    store2ia 0, 0, [argumINTDest]
+    addp 8, argumINTDest
 end
 
 macro argumINTFinish()
@@ -6168,10 +6233,19 @@ argumINTAlign(_end)
 elsif ARMv7
 # Put all ARMv7 instructions after this `elsif` or other architecturs will fail to build.
 
-# For 32-bit architectures: make sure that the assertions can still find the labels
-unimplementedInstruction(_unreachable)
+# For ARMv7: make sure that the assertions can still find the labels
+instructionLabel(_unreachable)
+    # unreachable
+    ipintException(Unreachable)
+
 unimplementedInstruction(_nop)
-unimplementedInstruction(_block)
+
+instructionLabel(_block)
+    # block
+    loadi [PM, MC], PC
+    loadi 4[PM, MC], MC
+    nextIPIntInstruction()
+
 unimplementedInstruction(_loop)
 unimplementedInstruction(_if)
 unimplementedInstruction(_else)
@@ -6226,7 +6300,19 @@ unimplementedInstruction(_select_t)
 reservedOpcode(0x1d)
 reservedOpcode(0x1e)
 reservedOpcode(0x1f)
-unimplementedInstruction(_local_get)
+
+instructionLabel(_local_get)
+    # local.get
+    loadb 1[PB, PC], t0
+    advancePC(2)
+    bbaeq t0, 128, _ipint_local_get_slow_path
+.ipint_local_get_post_decode:
+    # Index into locals
+    load2ia [PL, t0, LocalSize], t0, t1
+    # Push to stack
+    pushDoublePair(t1, t0)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_local_set)
 unimplementedInstruction(_local_tee)
 unimplementedInstruction(_global_get)
@@ -6258,22 +6344,118 @@ unimplementedInstruction(_i64_store8_mem)
 unimplementedInstruction(_i64_store16_mem)
 unimplementedInstruction(_i64_store32_mem)
 unimplementedInstruction(_memory_size)
-unimplementedInstruction(_memory_grow)
+
+instructionLabel(_memory_grow)
+    popInt32(a1, invalidGPR)
+    operationCall(macro() cCall2(_ipint_extern_memory_grow) end)
+    pushInt32(r0)
+    ipintReloadMemory()
+    advancePC(2)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_i32_const)
 unimplementedInstruction(_i64_const)
 unimplementedInstruction(_f32_const)
 unimplementedInstruction(_f64_const)
-unimplementedInstruction(_i32_eqz)
-unimplementedInstruction(_i32_eq)
-unimplementedInstruction(_i32_ne)
-unimplementedInstruction(_i32_lt_s)
-unimplementedInstruction(_i32_lt_u)
-unimplementedInstruction(_i32_gt_s)
-unimplementedInstruction(_i32_gt_u)
-unimplementedInstruction(_i32_le_s)
-unimplementedInstruction(_i32_le_u)
-unimplementedInstruction(_i32_ge_s)
-unimplementedInstruction(_i32_ge_u)
+
+instructionLabel(_i32_eqz)
+    # i32.eqz
+    popInt32(t0, invalidGPR)
+    cieq t0, 0, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_eq)
+    # i32.eq
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    cieq t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_ne)
+    # i32.ne
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    cineq t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_lt_s)
+    # i32.lt_s
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    cilt t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_lt_u)
+    # i32.lt_u
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    cib t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_gt_s)
+    # i32.gt_s
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    cigt t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_gt_u)
+    # i32.gt_u
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    cia t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_le_s)
+    # i32.le_s
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    cilteq t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_le_u)
+    # i32.le_u
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    cibeq t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_ge_s)
+    # i32.ge_s
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    cigteq t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_ge_u)
+    # i32.ge_u
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    ciaeq t0, t1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_i64_eqz)
 unimplementedInstruction(_i64_eq)
 unimplementedInstruction(_i64_ne)
@@ -6297,24 +6479,217 @@ unimplementedInstruction(_f64_lt)
 unimplementedInstruction(_f64_gt)
 unimplementedInstruction(_f64_le)
 unimplementedInstruction(_f64_ge)
-unimplementedInstruction(_i32_clz)
-unimplementedInstruction(_i32_ctz)
-unimplementedInstruction(_i32_popcnt)
-unimplementedInstruction(_i32_add)
-unimplementedInstruction(_i32_sub)
-unimplementedInstruction(_i32_mul)
-unimplementedInstruction(_i32_div_s)
-unimplementedInstruction(_i32_div_u)
-unimplementedInstruction(_i32_rem_s)
-unimplementedInstruction(_i32_rem_u)
-unimplementedInstruction(_i32_and)
-unimplementedInstruction(_i32_or)
-unimplementedInstruction(_i32_xor)
-unimplementedInstruction(_i32_shl)
-unimplementedInstruction(_i32_shr_s)
-unimplementedInstruction(_i32_shr_u)
-unimplementedInstruction(_i32_rotl)
-unimplementedInstruction(_i32_rotr)
+
+instructionLabel(_i32_clz)
+    # i32.clz
+    popInt32(t0, invalidGPR)
+    lzcnti t0, t1
+    pushInt32(t1)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_ctz)
+    # i32.ctz
+    popInt32(t0, invalidGPR)
+    tzcnti t0, t1
+    pushInt32(t1)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_popcnt)
+    # i32.popcnt
+    popInt32(t1, invalidGPR)
+    operationCall(macro() cCall2(_slow_path_wasm_popcount) end)
+    pushInt32(r1)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_add)
+    # i32.add
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    addi t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_sub)
+    # i32.sub
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    subi t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_mul)
+    # i32.mul
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    muli t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_div_s)
+    # i32.div_s
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    btiz t1, .ipint_i32_div_s_throwDivisionByZero
+
+    bineq t1, -1, .ipint_i32_div_s_safe
+    bieq t0, constexpr INT32_MIN, .ipint_i32_div_s_throwIntegerOverflow
+
+.ipint_i32_div_s_safe:
+    functionCall(macro () cCall2(_i32_div_s) end)
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_i32_div_s_throwDivisionByZero:
+    ipintException(DivisionByZero)
+
+.ipint_i32_div_s_throwIntegerOverflow:
+    ipintException(IntegerOverflow)
+
+instructionLabel(_i32_div_u)
+    # i32.div_u
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    btiz t1, .ipint_i32_div_u_throwDivisionByZero
+
+    functionCall(macro () cCall2(_i32_div_u) end)
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_i32_div_u_throwDivisionByZero:
+    ipintException(DivisionByZero)
+
+instructionLabel(_i32_rem_s)
+    # i32.rem_s
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+
+    btiz t1, .ipint_i32_rem_s_throwDivisionByZero
+
+    bineq t1, -1, .ipint_i32_rem_s_safe
+    bineq t0, constexpr INT32_MIN, .ipint_i32_rem_s_safe
+
+    move 0, t0
+    jmp .ipint_i32_rem_s_return
+
+.ipint_i32_rem_s_safe:
+    functionCall(macro () cCall2(_i32_rem_s) end)
+
+.ipint_i32_rem_s_return:
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_i32_rem_s_throwDivisionByZero:
+    ipintException(DivisionByZero)
+
+instructionLabel(_i32_rem_u)
+    # i32.rem_u
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    btiz t1, .ipint_i32_rem_u_throwDivisionByZero
+
+    functionCall(macro () cCall2(_i32_rem_u) end)
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_i32_rem_u_throwDivisionByZero:
+    ipintException(DivisionByZero)
+
+instructionLabel(_i32_and)
+    # i32.and
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    andi t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_or)
+    # i32.or
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    ori t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_xor)
+    # i32.xor
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    xori t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_shl)
+    # i32.shl
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    lshifti t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_shr_s)
+    # i32.shr_s
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    rshifti t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_shr_u)
+    # i32.shr_u
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    urshifti t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_rotl)
+    # i32.rotl
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    lrotatei t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_rotr)
+    # i32.rotr
+    popInt32(t1, invalidGPR)
+    popInt32(t0, invalidGPR)
+    rrotatei t1, t0
+    pushInt32(t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_i64_clz)
 unimplementedInstruction(_i64_ctz)
 unimplementedInstruction(_i64_popcnt)
@@ -6386,8 +6761,23 @@ unimplementedInstruction(_i32_reinterpret_f32)
 unimplementedInstruction(_i64_reinterpret_f64)
 unimplementedInstruction(_f32_reinterpret_i32)
 unimplementedInstruction(_f64_reinterpret_i64)
-unimplementedInstruction(_i32_extend8_s)
-unimplementedInstruction(_i32_extend16_s)
+
+instructionLabel(_i32_extend8_s)
+    # i32.extend8_s
+    popInt32(t0, invalidGPR)
+    sxb2i t0, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_extend16_s)
+    # i32.extend8_s
+    popInt32(t0, invalidGPR)
+    sxh2i t0, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_i64_extend8_s)
 unimplementedInstruction(_i64_extend16_s)
 unimplementedInstruction(_i64_extend32_s)
@@ -6451,9 +6841,33 @@ unimplementedInstruction(_simd)
 unimplementedInstruction(_atomic)
 reservedOpcode(0xff)
 
+#######################################
+## ULEB128 decoding logic for locals ##
+#######################################
+
+macro decodeULEB128(exitLabel, result)
+    # result should already be the first byte.
+    andp 0x7f, result
+    move 7, t2 # t1 holds the shift.
+.loop:
+    loadb [PB, PC], t3
+    andp t3, 0x7f, t1
+    lshiftp t2, t1
+    orp t1, result
+    addp 7, t2
+    advancePC(1)
+    bbaeq t3, 128, .loop
+    jmp exitLabel
+end
+
+slowPathLabel(_local_get)
+    break
+    decodeULEB128(.ipint_local_get_post_decode, t0)
+
 uintAlign(_r0)
 _uint_begin:
-    break
+    popDoublePair(r1, r0)
+    uintDispatch()
 
 uintAlign(_r1)
     break
@@ -6478,13 +6892,20 @@ uintAlign(_ret)
 # const argumINTSrc = t7
 
 argumINTAlign(_a0)
-    break
+_argumINT_begin:
+    storei a0, [argumINTDest]
+    storei a1, 4[argumINTDest]
+    addp 8, argumINTDest
+    argumINTDispatch()
 
 argumINTAlign(_a1)
     break
 
 argumINTAlign(_a2)
-    break
+    storei a2, [argumINTDest]
+    storei a3, 4[argumINTDest]
+    addp 8, argumINTDest
+    argumINTDispatch()
 
 argumINTAlign(_a3)
     break

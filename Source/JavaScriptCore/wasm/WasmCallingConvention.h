@@ -45,7 +45,11 @@ constexpr unsigned numberOfLLIntCalleeSaveRegisters = 3;
 #else
 constexpr unsigned numberOfLLIntCalleeSaveRegisters = 2;
 #endif
+#if CPU(ARM)
+constexpr unsigned numberOfIPIntCalleeSaveRegisters = 2;
+#else
 constexpr unsigned numberOfIPIntCalleeSaveRegisters = 3;
+#endif
 constexpr unsigned numberOfLLIntInternalRegisters = 2;
 
 struct ArgumentLocation {
