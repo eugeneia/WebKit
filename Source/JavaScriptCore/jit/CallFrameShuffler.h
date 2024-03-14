@@ -680,6 +680,10 @@ private:
 #if USE(JSVALUE32_64)
     void addNew(GPRReg gpr, ValueRecovery recovery)
     {
+        if (recovery.technique() == UnboxedInt32InGPR) {
+            addNew(JSValueRegs::payloadOnly(gpr), recovery);
+            return;
+        }
         ASSERT(gpr != InvalidGPRReg && !m_newRegisters[gpr]);
         ASSERT(recovery.technique() == Int32DisplacedInJSStack
             || recovery.technique() == Int32TagDisplacedInJSStack);
