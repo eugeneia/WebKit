@@ -6354,7 +6354,19 @@ instructionLabel(_memory_grow)
     nextIPIntInstruction()
 
 unimplementedInstruction(_i32_const)
-unimplementedInstruction(_i64_const)
+
+instructionLabel(_i64_const)
+    # i64.const
+    # Load pre-computed value from metadata
+    load2ia 1[PM, MC], t0, t1
+    # Push to stack
+    pushDoublePair(t1, t0)
+    loadb [PM, MC], t0
+
+    advancePCByReg(t0)
+    advanceMC(9)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_f32_const)
 unimplementedInstruction(_f64_const)
 
