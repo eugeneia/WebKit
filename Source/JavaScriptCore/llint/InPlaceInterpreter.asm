@@ -6288,8 +6288,51 @@ instructionLabel(_end)
     addp MC, PM
     uintDispatch()
 
-unimplementedInstruction(_br)
-unimplementedInstruction(_br_if)
+instructionLabel(_br)
+    # br
+    # number to pop
+    loadh 8[PM, MC], t0
+    # number to keep
+    loadh 10[PM, MC], t5
+
+    # ex. pop 3 and keep 2
+    #
+    # +4 +3 +2 +1 sp
+    # a  b  c  d  e
+    # d  e
+    #
+    # [sp + k + numToPop] = [sp + k] for k in numToKeep-1 -> 0
+    move t0, t2
+    lshiftp 4, t2
+    leap [sp, t2], t2
+
+.ipint_br_poploop:
+    bpeq t5, 0, .ipint_br_popend
+    subp 1, t5
+    move t5, t3
+    lshiftp 4, t3
+    load2ia [sp, t3], t0, t1
+    store2ia t0, t1, [t2, t3]
+    load2ia 8[sp, t3], t0, t1
+    store2ia t0, t1, 8[t2, t3]
+    jmp .ipint_br_poploop
+.ipint_br_popend:
+    loadh 8[PM, MC], t0
+    lshiftp 4, t0
+    leap [sp, t0], sp
+    loadi [PM, MC], PC
+    loadi 4[PM, MC], MC
+    nextIPIntInstruction()
+
+instructionLabel(_br_if)
+    # pop i32
+    popInt32(t0, invalidGPR)
+    bineq t0, 0, _ipint_br
+    loadb 12[PM, MC], t0
+    advanceMC(13)
+    advancePCByReg(t0)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_br_table)
 unimplementedInstruction(_return)
 
