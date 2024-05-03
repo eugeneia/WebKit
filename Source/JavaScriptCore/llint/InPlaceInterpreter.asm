@@ -7032,11 +7032,12 @@ mintAlign(_call)
     # Make the call
     move ipintCallSavedInstance, wasmInstance
     call ipintCallSavedEntrypoint, JSEntrySlowPathPtrTag
-    pop PM
 
     loadp ThisArgumentOffset - 16[sp], PC
     # Restore the stack pointer
     addp FirstArgumentOffset - 16, sp
+
+    pop PM
 
     # Hey, look. PM hasn't been used to store anything.
     # No need to compute anything, just directly load stuff we need.
@@ -7048,7 +7049,9 @@ mintAlign(_call)
     # Grab PL
     pop ipintCallSavedPL
 
-    loadh 2[PM], t5
+    # Adjust sp to pop off arguments consumed
+    # (mint popped off ipintCallShadowSP)
+    loadh 2[PM], t5 # argument count
     lshiftp 4, t5
     addp t5, sp
     addp 4, PM
@@ -7056,7 +7059,6 @@ mintAlign(_call)
 
 mintAlign(_r0)
 _mint_begin_return:
-    break
     pushDoublePair(r1, r0)
     mintRetDispatch()
 
@@ -7097,13 +7099,16 @@ mintAlign(_stack)
     break
 
 mintAlign(_end)
-    move PM, MC
+    # Stash away PM for later MC calculation
+    # (MC gets clobbered by getIPIntCallee())
+    push PM
     # Restore PL
     move ipintCallSavedPL, PL
     # Restore PB/PM
     getIPIntCallee()
     loadp Wasm::IPIntCallee::m_bytecode[ws0], PB
     loadp Wasm::IPIntCallee::m_metadata[ws0], PM
+    pop MC
     subp PM, MC
     # Restore memory
     ipintReloadMemory()
