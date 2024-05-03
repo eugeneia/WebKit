@@ -6783,7 +6783,18 @@ instructionLabel(_i32_rotr)
 unimplementedInstruction(_i64_clz)
 unimplementedInstruction(_i64_ctz)
 unimplementedInstruction(_i64_popcnt)
-unimplementedInstruction(_i64_add)
+
+instructionLabel(_i64_add)
+    # i64.add
+    popDoublePair(t1, t0)
+    popDoublePair(t3, t2)
+    addis t2, t0
+    adci  t3, t1
+    pushDoublePair(t1, t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_i64_sub)
 unimplementedInstruction(_i64_mul)
 unimplementedInstruction(_i64_div_s)
