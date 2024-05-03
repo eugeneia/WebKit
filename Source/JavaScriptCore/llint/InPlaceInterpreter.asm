@@ -6238,7 +6238,10 @@ instructionLabel(_unreachable)
     # unreachable
     ipintException(Unreachable)
 
-unimplementedInstruction(_nop)
+instructionLabel(_nop)
+    # nop
+    advancePC(1)
+    nextIPIntInstruction()
 
 instructionLabel(_block)
     # block
