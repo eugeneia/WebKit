@@ -6926,7 +6926,7 @@ macro mintRetDispatch()
     break
 .safe:
     lshiftp 6, csr1
-    leap (_mint_begin_return), t7
+    leap (_mint_begin_return + 1), t7
     addp csr1, t7
     # t7 = r9
     emit "bx r9"
