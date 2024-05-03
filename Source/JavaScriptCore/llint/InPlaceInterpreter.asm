@@ -6535,7 +6535,19 @@ instructionLabel(_i32_ge_u)
     nextIPIntInstruction()
 
 unimplementedInstruction(_i64_eqz)
-unimplementedInstruction(_i64_eq)
+
+instructionLabel(_i64_eq)
+    # i64.eq
+    popDoublePair(t1, t0)
+    popDoublePair(t3, t2)
+    move 0, t5
+    bineq t1, t3, .return
+    cieq t0, t2, t5
+.return:
+    pushInt32(t5)
+    advancePC(1)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_i64_ne)
 unimplementedInstruction(_i64_lt_s)
 unimplementedInstruction(_i64_lt_u)
