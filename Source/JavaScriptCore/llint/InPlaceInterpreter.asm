@@ -6334,7 +6334,16 @@ instructionLabel(_br_if)
     nextIPIntInstruction()
 
 unimplementedInstruction(_br_table)
-unimplementedInstruction(_return)
+
+instructionLabel(_return)
+    getIPIntCallee()
+    # ret
+    loadi Wasm::IPIntCallee::m_bytecodeLength[ws0], PC
+    loadi Wasm::IPIntCallee::m_returnMetadata[ws0], MC
+    subp 1, PC
+    # This is guaranteed going to an end instruction, so skip
+    # dispatch and end of program check for speed
+    jmp .ipint_end_ret
 
 instructionLabel(_call)
     storei PC, CallSiteIndex[cfr]
