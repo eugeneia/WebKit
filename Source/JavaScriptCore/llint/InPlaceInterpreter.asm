@@ -6780,9 +6780,53 @@ instructionLabel(_i32_rotr)
     advancePC(1)
     nextIPIntInstruction()
 
-unimplementedInstruction(_i64_clz)
-unimplementedInstruction(_i64_ctz)
-unimplementedInstruction(_i64_popcnt)
+instructionLabel(_i64_clz)
+    # i64.clz
+    popDoublePair(t1, t0)
+    btiz t1, .ipint_i64_clz_bottom
+
+    lzcnti t1, t0
+    jmp .ipint_i64_clz_return
+
+.ipint_i64_clz_bottom:
+    lzcnti t0, t0
+    addi 32, t0
+
+.ipint_i64_clz_return:
+    move 0, t1
+    pushDoublePair(t1, t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_ctz)
+    # i64.ctz
+    popDoublePair(t1, t0)
+    btiz t0, .ipint_i64_ctz_top
+
+    tzcnti t0, t0
+    jmp .ipint_i64_ctz_return
+
+.ipint_i64_ctz_top:
+    tzcnti t1, t0
+    addi 32, t0
+
+.ipint_i64_ctz_return:
+    move 0, t1
+    pushDoublePair(t1, t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_popcnt)
+    # i64.popcnt
+    popDoublePair(t3, t2)
+    operationCall(macro() cCall2(_slow_path_wasm_popcountll) end)
+    move 0, t0
+    pushDoublePair(t0, r1)
+
+    advancePC(1)
+    nextIPIntInstruction()
 
 instructionLabel(_i64_add)
     # i64.add
