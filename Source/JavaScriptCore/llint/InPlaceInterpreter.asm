@@ -6904,14 +6904,175 @@ instructionLabel(_i64_rem_u)
 .ipint_i64_rem_u_throwDivisionByZero:
     ipintException(DivisionByZero)
 
-unimplementedInstruction(_i64_and)
-unimplementedInstruction(_i64_or)
-unimplementedInstruction(_i64_xor)
-unimplementedInstruction(_i64_shl)
-unimplementedInstruction(_i64_shr_s)
-unimplementedInstruction(_i64_shr_u)
-unimplementedInstruction(_i64_rotl)
-unimplementedInstruction(_i64_rotr)
+instructionLabel(_i64_and)
+    # i64.and
+    popDoublePair(t3, t2)
+    popDoublePair(t1, t0)
+    andi t3, t1
+    andi t2, t0
+    pushDoublePair(t1, t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_or)
+    # i64.or
+    popDoublePair(t3, t2)
+    popDoublePair(t1, t0)
+    ori t3, t1
+    ori t2, t0
+    pushDoublePair(t1, t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_xor)
+    # i64.xor
+    popDoublePair(t3, t2)
+    popDoublePair(t1, t0)
+    xori t3, t1
+    xori t2, t0
+    pushDoublePair(t1, t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_shl)
+    # i64.shl
+    popInt32(t2, invalidGPR)
+    popDoublePair(t1, t0)
+    andi 0x3f, t2
+    btiz t2, .ipint_i64_shl_return
+    bib t2, 32, .ipint_i64_lessThan32
+
+    subi 32, t2
+    lshifti t0, t2, t1
+    move 0, t0
+    jmp .ipint_i64_shl_return
+
+.ipint_i64_lessThan32:
+    lshifti t2, t1
+    move 32, t3
+    subi t2, t3
+    urshifti t0, t3, t3
+    ori t3, t1
+    lshifti t2, t0
+
+.ipint_i64_shl_return:
+    pushDoublePair(t1, t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_shr_s)
+    # i64.shr_s
+    popInt32(t2, invalidGPR)
+    popDoublePair(t1, t0)
+    andi 0x3f, t2
+    btiz t2, .ipint_i64_shr_s_return
+    bib t2, 32, .ipint_i64_shr_s_lessThan32
+
+    subi 32, t2
+    rshifti t1, t2, t0
+    rshifti 31, t1
+    jmp .ipint_i64_shr_s_return
+
+.ipint_i64_shr_s_lessThan32:
+    urshifti t2, t0
+    move 32, t3
+    subi t2, t3
+    lshifti t1, t3, t3
+    ori t3, t0
+    rshifti t2, t1
+
+.ipint_i64_shr_s_return:
+    pushDoublePair(t1, t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_shr_u)
+    # i64.shr_u
+    popInt32(t2, invalidGPR)
+    popDoublePair(t1, t0)
+    andi 0x3f, t2
+    btiz t2, .ipint_i64_shr_u_return
+    bib t2, 32, .ipint_i64_shr_u_lessThan32
+
+    subi 32, t2
+    urshifti t1, t2, t0
+    move 0, t1
+    jmp .ipint_i64_shr_u_return
+
+.ipint_i64_shr_u_lessThan32:
+    urshifti t2, t0
+    move 32, t3
+    subi t2, t3
+    lshifti t1, t3, t3
+    ori t3, t0
+    urshifti t2, t1
+
+.ipint_i64_shr_u_return:
+    pushDoublePair(t1, t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_rotl)
+    # i64.rotl
+    popInt32(t2, invalidGPR)
+    popDoublePair(t1, t0)
+    andi t2, 0x20, t3
+    btiz t3, .ipint_i64_rotl_noSwap
+
+    move t0, t3
+    move t1, t0
+    move t3, t1
+
+.ipint_i64_rotl_noSwap:
+    andi 0x1f, t2
+    btiz t2, .ipint_i64_rotl_return
+
+    move 32, t5
+    subi t2, t5
+    urshifti t0, t5, t3
+    urshifti t1, t5, t5
+    lshifti t2, t0
+    lshifti t2, t1
+    ori t5, t0
+    ori t3, t1
+
+.ipint_i64_rotl_return:
+    pushDoublePair(t1, t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_rotr)
+    # i64.rotr
+    popInt32(t2, invalidGPR)
+    popDoublePair(t1, t0)
+    andi t2, 0x20, t3
+    btiz t3, .ipint_i64_rotr_noSwap
+
+    move t0, t3
+    move t1, t0
+    move t3, t1
+
+.ipint_i64_rotr_noSwap:
+    andi 0x1f, t2
+    btiz t2, .ipint_i64_rotr_return
+
+    move 32, t5
+    subi t2, t5
+    lshifti t0, t5, t3
+    lshifti t1, t5, t5
+    urshifti t2, t0
+    urshifti t2, t1
+    ori t5, t0
+    ori t3, t1
+
+.ipint_i64_rotr_return:
+    pushDoublePair(t1, t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_f32_abs)
 unimplementedInstruction(_f32_neg)
 unimplementedInstruction(_f32_ceil)
