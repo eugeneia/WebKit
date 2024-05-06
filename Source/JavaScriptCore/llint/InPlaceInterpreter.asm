@@ -6806,7 +6806,20 @@ instructionLabel(_i64_sub)
     advancePC(1)
     nextIPIntInstruction()
 
-unimplementedInstruction(_i64_mul)
+instructionLabel(_i64_mul)
+    # i64.mul
+    popDoublePair(t3, t2)
+    popDoublePair(t1, t0)
+    muli t2, t1
+    muli t0, t3
+    umulli t0, t2, t0, t2
+    addi t1, t2
+    addi t3, t2
+    pushDoublePair(t2, t0)
+
+    advancePC(1)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_i64_div_s)
 unimplementedInstruction(_i64_div_u)
 unimplementedInstruction(_i64_rem_s)
