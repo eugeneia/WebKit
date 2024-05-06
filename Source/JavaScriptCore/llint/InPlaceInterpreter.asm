@@ -6820,10 +6820,90 @@ instructionLabel(_i64_mul)
     advancePC(1)
     nextIPIntInstruction()
 
-unimplementedInstruction(_i64_div_s)
-unimplementedInstruction(_i64_div_u)
-unimplementedInstruction(_i64_rem_s)
-unimplementedInstruction(_i64_rem_u)
+instructionLabel(_i64_div_s)
+    # i64.div_s
+    popDoublePair(t3, t2)
+    popDoublePair(t1, t0)
+    btinz t3, .ipint_i64_div_s_nonZero
+    btiz t2, .ipint_i64_div_s_throwDivisionByZero
+
+.ipint_i64_div_s_nonZero:
+    bineq t3, -1, .ipint_i64_div_s_safe
+    bineq t2, -1, .ipint_i64_div_s_safe
+    bineq t1, constexpr INT32_MIN, .ipint_i64_div_s_safe
+    btiz t0, .ipint_i64_div_s_throwIntegerOverflow
+
+.ipint_i64_div_s_safe:
+    functionCall(macro () cCall4(_i64_div_s) end)
+    pushDoublePair(t1, t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_i64_div_s_throwDivisionByZero:
+    ipintException(DivisionByZero)
+
+.ipint_i64_div_s_throwIntegerOverflow:
+    ipintException(IntegerOverflow)
+
+instructionLabel(_i64_div_u)
+    # i64.div_u
+    popDoublePair(t3, t2)
+    popDoublePair(t1, t0)
+    btinz t3, .ipint_i64_div_u_nonZero
+    btiz t2, .ipint_i64_div_u_throwDivisionByZero
+
+.ipint_i64_div_u_nonZero:
+    functionCall(macro () cCall4(_i64_div_u) end)
+    pushDoublePair(t1, t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_i64_div_u_throwDivisionByZero:
+    ipintException(DivisionByZero)
+
+instructionLabel(_i64_rem_s)
+    # i64.rem_s
+    popDoublePair(t3, t2)
+    popDoublePair(t1, t0)
+    btinz t3, .ipint_i64_rem_s_nonZero
+    btiz t2, .ipint_i64_rem_s_throwDivisionByZero
+
+.ipint_i64_rem_s_nonZero:
+    bineq t3, -1, .ipint_i64_rem_s_safe
+    bineq t2, -1, .ipint_i64_rem_s_safe
+    bineq t1, constexpr INT32_MIN, .ipint_i64_rem_s_safe
+
+    move 0, t1
+    move 0, t0
+    jmp .ipint_i64_rem_s_return
+
+.ipint_i64_rem_s_safe:
+    functionCall(macro () cCall4(_i64_rem_s) end)
+
+.ipint_i64_rem_s_return:
+    pushDoublePair(t1, t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_i64_rem_s_throwDivisionByZero:
+    ipintException(DivisionByZero)
+
+instructionLabel(_i64_rem_u)
+    # i64.rem_u
+    popDoublePair(t3, t2)
+    popDoublePair(t1, t0)
+    btinz t3, .ipint_i64_rem_u_nonZero
+    btiz t2, .ipint_i64_rem_u_throwDivisionByZero
+
+.ipint_i64_rem_u_nonZero:
+    functionCall(macro () cCall4(_i64_rem_u) end)
+    pushDoublePair(t1, t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_i64_rem_u_throwDivisionByZero:
+    ipintException(DivisionByZero)
+
 unimplementedInstruction(_i64_and)
 unimplementedInstruction(_i64_or)
 unimplementedInstruction(_i64_xor)
