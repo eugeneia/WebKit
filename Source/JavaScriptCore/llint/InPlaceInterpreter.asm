@@ -6277,7 +6277,7 @@ macro uintDispatch()
 end
 
 instructionLabel(_end)
-    #loadp UnboxedWasmCalleeStackSlot[cfr], ws0
+    loadp UnboxedWasmCalleeStackSlot[cfr], ws0
     loadi Wasm::IPIntCallee::m_bytecodeLength[ws0], t0
     subp 1, t0
     bpeq PC, t0, .ipint_end_ret
@@ -6336,7 +6336,7 @@ instructionLabel(_br_if)
 unimplementedInstruction(_br_table)
 
 instructionLabel(_return)
-    getIPIntCallee()
+    loadp UnboxedWasmCalleeStackSlot[cfr], ws0
     # ret
     loadi Wasm::IPIntCallee::m_bytecodeLength[ws0], PC
     loadi Wasm::IPIntCallee::m_returnMetadata[ws0], MC
