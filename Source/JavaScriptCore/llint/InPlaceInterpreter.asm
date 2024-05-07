@@ -6554,29 +6554,153 @@ instructionLabel(_i32_ge_u)
     advancePC(1)
     nextIPIntInstruction()
 
-unimplementedInstruction(_i64_eqz)
+instructionLabel(_i64_eqz)
+    # i64.eqz
+    popDoublePair(t1, t0)
+    move 0, t2
+    btinz t1, .ipint_i64_eqz_return
+    cieq t0, 0, t2
+.ipint_i64_eqz_return:
+    pushInt32(t2)
+    advancePC(1)
+    nextIPIntInstruction()
 
 instructionLabel(_i64_eq)
     # i64.eq
-    popDoublePair(t1, t0)
     popDoublePair(t3, t2)
+    popDoublePair(t1, t0)
     move 0, t5
-    bineq t1, t3, .return
+    bineq t1, t3, .ipint_i64_eq_return
     cieq t0, t2, t5
-.return:
+.ipint_i64_eq_return:
     pushInt32(t5)
     advancePC(1)
     nextIPIntInstruction()
 
-unimplementedInstruction(_i64_ne)
-unimplementedInstruction(_i64_lt_s)
-unimplementedInstruction(_i64_lt_u)
-unimplementedInstruction(_i64_gt_s)
-unimplementedInstruction(_i64_gt_u)
-unimplementedInstruction(_i64_le_s)
-unimplementedInstruction(_i64_le_u)
-unimplementedInstruction(_i64_ge_s)
-unimplementedInstruction(_i64_ge_u)
+instructionLabel(_i64_ne)
+    # i64.ne
+    popDoublePair(t3, t2)
+    popDoublePair(t1, t0)
+    move 1, t5
+    bineq t1, t3, .ipint_i64_ne_return
+    cineq t0, t2, t5
+.ipint_i64_ne_return:
+    pushInt32(t5)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_lt_s)
+    # i64.lt_s
+    popDoublePair(t3, t2)
+    popDoublePair(t1, t0)
+    move 1, t5
+    bilt t1, t3, .ipint_i64_lt_s_return
+    move 0, t5
+    bigt t1, t3, .ipint_i64_lt_s_return
+    cib t0, t2, t5
+.ipint_i64_lt_s_return:
+    pushInt32(t5)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_lt_u)
+    # i64.lt_u
+    popDoublePair(t3, t2)
+    popDoublePair(t1, t0)
+    move 1, t5
+    bib t1, t3, .ipint_i64_lt_u_return
+    move 0, t5
+    bia t1, t3, .ipint_i64_lt_u_return
+    cib t0, t2, t5
+.ipint_i64_lt_u_return:
+    pushInt32(t5)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_gt_s)
+    # i64.gt_s
+    popDoublePair(t3, t2)
+    popDoublePair(t1, t0)
+    move 1, t5
+    bigt t1, t3, .ipint_i64_gt_s_return
+    move 0, t5
+    bilt t1, t3, .ipint_i64_gt_s_return
+    cia t0, t2, t5
+.ipint_i64_gt_s_return:
+    pushInt32(t5)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_gt_u)
+    # i64.gt_u
+    popDoublePair(t3, t2)
+    popDoublePair(t1, t0)
+    move 1, t5
+    bia t1, t3, .ipint_i64_gt_u_return
+    move 0, t5
+    bib t1, t3, .ipint_i64_gt_u_return
+    cia t0, t2, t5
+.ipint_i64_gt_u_return:
+    pushInt32(t5)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_le_s)
+    # i64.le_s
+    popDoublePair(t3, t2)
+    popDoublePair(t1, t0)
+    move 1, t5
+    bilt t1, t3, .ipint_i64_le_s_return
+    move 0, t5
+    bigt t1, t3, .ipint_i64_le_s_return
+    cibeq t0, t2, t5
+.ipint_i64_le_s_return:
+    pushInt32(t5)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_le_u)
+    # i64.le_u
+    popDoublePair(t3, t2)
+    popDoublePair(t1, t0)
+    move 1, t5
+    bib t1, t3, .ipint_i64_le_u_return
+    move 0, t5
+    bia t1, t3, .ipint_i64_le_u_return
+    cibeq t0, t2, t5
+.ipint_i64_le_u_return:
+    pushInt32(t5)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_ge_s)
+    # i64.ge_s
+    popDoublePair(t3, t2)
+    popDoublePair(t1, t0)
+    move 1, t5
+    bigt t1, t3, .ipint_i64_ge_s_return
+    move 0, t5
+    bilt t1, t3, .ipint_i64_ge_s_return
+    ciaeq t0, t2, t5
+.ipint_i64_ge_s_return:
+    pushInt32(t5)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_ge_u)
+    # i64.ge_u
+    popDoublePair(t3, t2)
+    popDoublePair(t1, t0)
+    move 0, t5
+    bib t1, t3, .ipint_i64_ge_u_return
+    move 1, t5
+    bia t1, t3, .ipint_i64_ge_u_return
+    ciaeq t0, t2, t5
+.ipint_i64_ge_u_return:
+    pushInt32(t5)
+    advancePC(1)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_f32_eq)
 unimplementedInstruction(_f32_ne)
 unimplementedInstruction(_f32_lt)
