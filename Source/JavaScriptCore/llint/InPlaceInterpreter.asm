@@ -7187,9 +7187,32 @@ instructionLabel(_i32_extend16_s)
     advancePC(1)
     nextIPIntInstruction()
 
-unimplementedInstruction(_i64_extend8_s)
-unimplementedInstruction(_i64_extend16_s)
-unimplementedInstruction(_i64_extend32_s)
+instructionLabel(_i64_extend8_s)
+    # i64.extend8_s
+    popInt32(t0, invalidGPR)
+    sxb2i t0, t0
+    rshifti t0, 31, t1
+    pushDoublePair(t1, t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_extend16_s)
+    # i64.extend8_s
+    popInt32(t0, invalidGPR)
+    sxh2i t0, t0
+    rshifti t0, 31, t1
+    pushDoublePair(t1, t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_extend32_s)
+    # i64.extend8_s
+    popInt32(t0, invalidGPR)
+    rshifti t0, 31, t1
+    pushDoublePair(t1, t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
 reservedOpcode(0xc5)
 reservedOpcode(0xc6)
 reservedOpcode(0xc7)
