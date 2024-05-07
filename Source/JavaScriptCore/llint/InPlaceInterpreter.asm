@@ -6419,7 +6419,27 @@ instructionLabel(_memory_grow)
     advancePC(2)
     nextIPIntInstruction()
 
-unimplementedInstruction(_i32_const)
+instructionLabel(_i32_const)
+    # i32.const
+    loadb [PM, MC], t1
+    bigteq t1, 2, .ipint_i32_const_slowpath
+    loadb 1[PB, PC], t0
+    lshifti 7, t1
+    ori t1, t0
+    sxb2i t0, t0
+    pushInt32(t0)
+    advancePC(2)
+    advanceMC(1)
+    nextIPIntInstruction()
+.ipint_i32_const_slowpath:
+    # Load pre-computed value from metadata
+    loadi 1[PM, MC], t0
+    # Push to stack
+    pushInt32(t0)
+
+    advancePCByReg(t1)
+    advanceMC(5)
+    nextIPIntInstruction()
 
 instructionLabel(_i64_const)
     # i64.const
