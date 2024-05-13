@@ -75,6 +75,7 @@ do { \
     RELEASE_ASSERT_WITH_MESSAGE((char*)(untaggedPtr) - (char*)(untaggedBase) == opcode * 256, #name); \
 } while (false);
 
+#if CPU(ADDRESS64)
 #define VALIDATE_JS_TO_WASM_WRAPPER_ENTRY(opcode, name) \
 do { \
     void* base = reinterpret_cast<void*>(js_to_wasm_wrapper_entry_interp_LoadI32_validate); \
@@ -83,10 +84,13 @@ do { \
     void* untaggedPtr = CodePtr<CFunctionPtrTag>::fromTaggedPtr(ptr).template untaggedPtr(); \
     RELEASE_ASSERT_WITH_MESSAGE((char*)(untaggedPtr) - (char*)(untaggedBase) == ((opcode) * 8 * 4), (#name)); \
 } while (false);
+#else
+#define VALIDATE_JS_TO_WASM_WRAPPER_ENTRY(opcode, name)
+#endif
 
 void initialize()
 {
-#if !ENABLE(C_LOOP) && CPU(ADDRESS64) && (CPU(ARM64) || (CPU(X86_64) && !OS(WINDOWS)))
+#if !ENABLE(C_LOOP) && ((CPU(ADDRESS64) && (CPU(ARM64) || (CPU(X86_64) && !OS(WINDOWS)))) || (CPU(ADDRESS32) && CPU(ARM_THUMB2)))
     FOR_EACH_IPINT_OPCODE(VALIDATE_IPINT_OPCODE);
     FOR_EACH_IPINT_0xFC_TRUNC_OPCODE(VALIDATE_IPINT_0xFC_OPCODE);
     FOR_EACH_IPINT_SIMD_OPCODE(VALIDATE_IPINT_SIMD_OPCODE);
@@ -99,8 +103,6 @@ void initialize()
         // This is the label representing the farthest possible dispatch jump
         VALIDATE_JS_TO_WASM_WRAPPER_ENTRY(static_cast<int>(Wasm::JSEntrypointInterpreterCalleeMetadata::OpcodeMask) + 1, afterops);
     }
-#elif !ENABLE(C_LOOP) && CPU(ARM)
-    // XXX
 #else
     RELEASE_ASSERT_NOT_REACHED("IPInt only supports ARM64 and X86_64 (for now).");
 #endif
