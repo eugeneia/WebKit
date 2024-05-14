@@ -7874,6 +7874,12 @@ slowPathLabel(_local_get)
     break
     decodeULEB128(.ipint_local_get_post_decode, t0)
 
+slowPathLabel(_local_set)
+    break
+
+slowPathLabel(_local_tee)
+    break
+
 ##################################
 ## "Out of line" logic for call ##
 ##################################
