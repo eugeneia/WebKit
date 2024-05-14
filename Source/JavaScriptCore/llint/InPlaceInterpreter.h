@@ -561,25 +561,68 @@ extern "C" void ipint_catch_all_entry();
     m(0x4d, i64_atomic_rmw16_cmpxchg_u) \
     m(0x4e, i64_atomic_rmw32_cmpxchg_u) \
 
+#define FOR_EACH_IPINT_ARGUMINT_OPCODE(m) \
+    m(0x00, argumINT_a0) \
+    m(0x01, argumINT_a1) \
+    m(0x02, argumINT_a2) \
+    m(0x03, argumINT_a3) \
+    m(0x04, argumINT_a4) \
+    m(0x05, argumINT_a5) \
+    m(0x06, argumINT_a6) \
+    m(0x07, argumINT_a7) \
+    m(0x08, argumINT_fa0) \
+    m(0x09, argumINT_fa1) \
+    m(0x0a, argumINT_fa2) \
+    m(0x0b, argumINT_fa3) \
+    m(0x0c, argumINT_stack) \
+    m(0x0d, argumINT_end) \
+
+#define FOR_EACH_IPINT_SLOW_PATH(m) \
+    m(0x00, local_get_slow_path) \
+    m(0x01, local_set_slow_path) \
+    m(0x02, local_tee_slow_path) \
+
+#define FOR_EACH_IPINT_MINT_OPCODE(m) \
+    m(0x00, mint_a0) \
+    m(0x01, mint_a1) \
+    m(0x02, mint_a2) \
+    m(0x03, mint_a3) \
+    m(0x04, mint_a4) \
+    m(0x05, mint_a5) \
+    m(0x06, mint_a6) \
+    m(0x07, mint_a7) \
+    m(0x08, mint_fa0) \
+    m(0x09, mint_fa1) \
+    m(0x0a, mint_fa2) \
+    m(0x0b, mint_fa3) \
+    m(0x0c, mint_stackzero) \
+    m(0x0d, mint_stackeight) \
+    m(0x0e, mint_gap) \
+    m(0x0f, mint_call) \
+    m(0x10, mint_r0) \
+    m(0x11, mint_r1) \
+    m(0x12, mint_r2) \
+    m(0x13, mint_r3) \
+    m(0x14, mint_r4) \
+    m(0x15, mint_r5) \
+    m(0x16, mint_r6) \
+    m(0x17, mint_r7) \
+    m(0x18, mint_fr0) \
+    m(0x19, mint_fr1) \
+    m(0x1a, mint_fr2) \
+    m(0x1b, mint_fr3) \
+    m(0x1c, mint_stack) \
+    m(0x1d, mint_end) \
+
+#define FOR_EACH_IPINT_UINT_OPCODE(m) \
+    m(0x00, uint_r0) \
+    m(0x01, uint_r1) \
+    m(0x02, uint_fr1) \
+    m(0x03, uint_stack) \
+    m(0x04, uint_ret) \
+
 // TODO: correctly validate these alignments
 #define FOR_EACH_IPINT_UNVALIDATED_ALIGNED_LABEL(m) \
-    m(0x00, argumINT_a0) \
-    m(0x00, argumINT_a1) \
-    m(0x00, argumINT_a2) \
-    m(0x00, argumINT_a3) \
-    m(0x00, argumINT_a4) \
-    m(0x00, argumINT_a5) \
-    m(0x00, argumINT_a6) \
-    m(0x00, argumINT_a7) \
-    m(0x00, argumINT_end) \
-    m(0x00, argumINT_fa0) \
-    m(0x00, argumINT_fa1) \
-    m(0x00, argumINT_fa2) \
-    m(0x00, argumINT_fa3) \
-    m(0x00, argumINT_stack) \
-    m(0x00, local_get_slow_path) \
-    m(0x00, local_set_slow_path) \
-    m(0x00, local_tee_slow_path) \
     m(0x00, reserved_0x12) \
     m(0x00, reserved_0x13) \
     m(0x00, reserved_0x14) \
@@ -676,42 +719,6 @@ extern "C" void ipint_catch_all_entry();
     m(0x00, reserved__atomic_0xd) \
     m(0x00, reserved__atomic_0xe) \
     m(0x00, reserved__atomic_0xf) \
-    m(0x00, mint_a0) \
-    m(0x00, mint_a1) \
-    m(0x00, mint_a2) \
-    m(0x00, mint_a3) \
-    m(0x00, mint_a4) \
-    m(0x00, mint_a5) \
-    m(0x00, mint_a6) \
-    m(0x00, mint_a7) \
-    m(0x00, mint_call) \
-    m(0x00, mint_end) \
-    m(0x00, mint_fa0) \
-    m(0x00, mint_fa1) \
-    m(0x00, mint_fa2) \
-    m(0x00, mint_fa3) \
-    m(0x00, mint_fr0) \
-    m(0x00, mint_fr1) \
-    m(0x00, mint_fr2) \
-    m(0x00, mint_fr3) \
-    m(0x00, mint_gap) \
-    m(0x00, mint_r0) \
-    m(0x00, mint_r1) \
-    m(0x00, mint_r2) \
-    m(0x00, mint_r3) \
-    m(0x00, mint_r4) \
-    m(0x00, mint_r5) \
-    m(0x00, mint_r6) \
-    m(0x00, mint_r7) \
-    m(0x00, mint_stack) \
-    m(0x00, mint_stackeight) \
-    m(0x00, mint_stackzero) \
-    m(0x00, uint_fr1) \
-    m(0x00, uint_r0) \
-    m(0x00, uint_r1) \
-    m(0x00, uint_ret) \
-    m(0x00, uint_stack) \
-
 
 #if !ENABLE(C_LOOP) && (CPU(ADDRESS64) && (CPU(ARM64) || (CPU(X86_64) && !OS(WINDOWS))) || (CPU(ADDRESS32) && CPU(ARM_THUMB2)))
 FOR_EACH_IPINT_OPCODE(IPINT_VALIDATE_DEFINE_FUNCTION);
@@ -723,6 +730,10 @@ FOR_EACH_JS_TO_WASM_WRAPPER_METADATA_OPCODE(JS_TO_WASM_WRAPPER_ENTRY_VALIDATE_DE
 JS_TO_WASM_WRAPPER_ENTRY_VALIDATE_DEFINE_FUNCTION(_, invalidop);
 // This is the label representing the furthest possible dispatch jump
 JS_TO_WASM_WRAPPER_ENTRY_VALIDATE_DEFINE_FUNCTION(_, afterops);
+FOR_EACH_IPINT_ARGUMINT_OPCODE(IPINT_VALIDATE_DEFINE_FUNCTION);
+FOR_EACH_IPINT_SLOW_PATH(IPINT_VALIDATE_DEFINE_FUNCTION);
+FOR_EACH_IPINT_MINT_OPCODE(IPINT_VALIDATE_DEFINE_FUNCTION);
+FOR_EACH_IPINT_UINT_OPCODE(IPINT_VALIDATE_DEFINE_FUNCTION);
 FOR_EACH_IPINT_UNVALIDATED_ALIGNED_LABEL(IPINT_VALIDATE_DEFINE_FUNCTION);
 #endif
 

@@ -75,6 +75,42 @@ do { \
     RELEASE_ASSERT_WITH_MESSAGE((char*)(untaggedPtr) - (char*)(untaggedBase) == opcode * 256, #name); \
 } while (false);
 
+#define VALIDATE_IPINT_ARGUMINT_OPCODE(opcode, name) \
+do { \
+    void* base = reinterpret_cast<void*>(ipint_argumINT_a0_validate); \
+    void* ptr = reinterpret_cast<void*>(ipint_ ## name ## _validate); \
+    void* untaggedBase = CodePtr<CFunctionPtrTag>::fromTaggedPtr(base).template untaggedPtr(); \
+    void* untaggedPtr = CodePtr<CFunctionPtrTag>::fromTaggedPtr(ptr).template untaggedPtr(); \
+    RELEASE_ASSERT_WITH_MESSAGE((char*)(untaggedPtr) - (char*)(untaggedBase) == opcode * 64, #name); \
+} while (false);
+
+#define VALIDATE_IPINT_SLOW_PATH(opcode, name) \
+do { \
+    void* base = reinterpret_cast<void*>(ipint_local_get_slow_path_validate); \
+    void* ptr = reinterpret_cast<void*>(ipint_ ## name ## _validate); \
+    void* untaggedBase = CodePtr<CFunctionPtrTag>::fromTaggedPtr(base).template untaggedPtr(); \
+    void* untaggedPtr = CodePtr<CFunctionPtrTag>::fromTaggedPtr(ptr).template untaggedPtr(); \
+    RELEASE_ASSERT_WITH_MESSAGE((char*)(untaggedPtr) - (char*)(untaggedBase) == opcode * 256, #name); \
+} while (false);
+
+#define VALIDATE_IPINT_MINT_OPCODE(opcode, name) \
+do { \
+    void* base = reinterpret_cast<void*>(ipint_mint_a0_validate); \
+    void* ptr = reinterpret_cast<void*>(ipint_ ## name ## _validate); \
+    void* untaggedBase = CodePtr<CFunctionPtrTag>::fromTaggedPtr(base).template untaggedPtr(); \
+    void* untaggedPtr = CodePtr<CFunctionPtrTag>::fromTaggedPtr(ptr).template untaggedPtr(); \
+    RELEASE_ASSERT_WITH_MESSAGE((char*)(untaggedPtr) - (char*)(untaggedBase) == opcode * 64, #name); \
+} while (false);
+
+#define VALIDATE_IPINT_UINT_OPCODE(opcode, name) \
+do { \
+    void* base = reinterpret_cast<void*>(ipint_uint_r0_validate); \
+    void* ptr = reinterpret_cast<void*>(ipint_ ## name ## _validate); \
+    void* untaggedBase = CodePtr<CFunctionPtrTag>::fromTaggedPtr(base).template untaggedPtr(); \
+    void* untaggedPtr = CodePtr<CFunctionPtrTag>::fromTaggedPtr(ptr).template untaggedPtr(); \
+    RELEASE_ASSERT_WITH_MESSAGE((char*)(untaggedPtr) - (char*)(untaggedBase) == opcode * 64, #name); \
+} while (false);
+
 #if CPU(ADDRESS64)
 #define VALIDATE_JS_TO_WASM_WRAPPER_ENTRY(opcode, name) \
 do { \
@@ -103,6 +139,11 @@ void initialize()
         // This is the label representing the farthest possible dispatch jump
         VALIDATE_JS_TO_WASM_WRAPPER_ENTRY(static_cast<int>(Wasm::JSEntrypointInterpreterCalleeMetadata::OpcodeMask) + 1, afterops);
     }
+
+    FOR_EACH_IPINT_ARGUMINT_OPCODE(VALIDATE_IPINT_ARGUMINT_OPCODE);
+    FOR_EACH_IPINT_SLOW_PATH(VALIDATE_IPINT_SLOW_PATH);
+    FOR_EACH_IPINT_MINT_OPCODE(VALIDATE_IPINT_MINT_OPCODE);
+    FOR_EACH_IPINT_UINT_OPCODE(VALIDATE_IPINT_UINT_OPCODE);
 #else
     RELEASE_ASSERT_NOT_REACHED("IPInt only supports ARM64 and X86_64 (for now).");
 #endif
