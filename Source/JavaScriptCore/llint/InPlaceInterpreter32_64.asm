@@ -213,6 +213,11 @@ unimplementedInstruction(_throw)
 unimplementedInstruction(_rethrow)
 reservedOpcode(0xa)
 
+# PM = location in uINT bytecode
+# t6 = tmp
+# sp = src
+# t7 = for dispatch
+
 macro uintDispatch()
     loadb [PM], t6
     addp 1, PM
@@ -242,7 +247,13 @@ unimplementedInstruction(_br)
 unimplementedInstruction(_br_if)
 unimplementedInstruction(_br_table)
 unimplementedInstruction(_return)
-unimplementedInstruction(_call)
+
+instructionLabel(_call)
+    storei PC, CallSiteIndex[cfr]
+
+    # call
+    jmp _ipint_call_impl
+
 unimplementedInstruction(_call_indirect)
 reservedOpcode(0x12)
 reservedOpcode(0x13)
@@ -1300,15 +1311,97 @@ slowPathLabel(_local_set)
 slowPathLabel(_local_tee)
     break
 
+##################################
+## "Out of line" logic for call ##
+##################################
+
+# PM = location in mintINT bytecode
+# csr1 = tmp
+# sp = dst
+# t5 = src
+# t7 = for dispatch
+
+macro mintPop(hi, lo)
+    load2ia [t5], lo, hi
+    addp 16, t5
+end
+
+macro mintPopF(reg)
+    break
+    loadd [t5], reg
+    addp 16, t5
+end
+
+macro mintArgDispatch()
+    loadb [PM], csr1
+    addp 1, PM
+    andp 15, csr1
+    lshiftp 6, csr1
+    leap (_mint_begin + 1), t7
+    addp csr1, t7
+    # t7 = r9
+    emit "bx r9"
+end
+
+macro mintRetDispatch()
+    loadb [PM], csr1
+    addp 1, PM
+    bilt csr1, 14, .safe
+    break
+.safe:
+    lshiftp 6, csr1
+    leap (_mint_begin_return + 1), t7
+    addp csr1, t7
+    # t7 = r9
+    emit "bx r9"
+end
+
+_ipint_call_impl:
+    # 0 - 3: function index
+    # 4 - 7: PC post call
+    # 8 - 9: length of mint bytecode
+    # 10 - : mint bytecode
+
+    # function index
+    loadi 1[PM, MC], t0
+
+    loadb [PM, MC], t1
+    advancePCByReg(t1)
+    advanceMC(5)
+
+    # Get function data
+    move t0, a1
+    operationCall(macro() cCall2(_ipint_extern_call) end)
+    # r0 = entrypoint
+    # r1 = wasmInstance
+
+    # CANNOT throw away: entrypoint, PM
+    # CAN throw away immediately: PB
+    # for call: MUST preserve MC
+    # for call: PB/PM (load from callee)
+
+    # shadow stack pointer
+    const ipintCallShadowSP = t5
+
+    move sp, ipintCallShadowSP
+
+    push PL, r0, r1
+
+    # We'll update PM to be the value that the return metadata starts at
+    addp MC, PM
+    mintArgDispatch()
+
 mintAlign(_a0)
 _mint_begin:
-    break
+    mintPop(a1, a0)
+    mintArgDispatch()
 
 mintAlign(_a1)
     break
 
 mintAlign(_a2)
-    break
+    mintPop(a3, a2)
+    mintArgDispatch()
 
 mintAlign(_a3)
     break
@@ -1347,11 +1440,51 @@ mintAlign(_gap)
     break
 
 mintAlign(_call)
-    break
+    const ipintCallSavedInstance = t5
+    pop ipintCallSavedInstance
+    const ipintCallSavedEntrypoint = PB
+    pop ipintCallSavedEntrypoint
+
+    # Save PM (conflicts with wasmInstance)
+    push PM
+
+    # Set up the rest of the stack frame
+    subp FirstArgumentOffset - 16, sp
+
+    storep PC, ThisArgumentOffset - 16[sp]
+
+    # Make the call
+    move ipintCallSavedInstance, wasmInstance
+    call ipintCallSavedEntrypoint, JSEntrySlowPathPtrTag
+
+    loadp ThisArgumentOffset - 16[sp], PC
+    # Restore the stack pointer
+    addp FirstArgumentOffset - 16, sp
+
+    pop PM
+
+    # Hey, look. PM hasn't been used to store anything.
+    # No need to compute anything, just directly load stuff we need.
+    loadh [PM], t5  # number of stack args
+    leap [sp, t5, 8], sp
+
+    const ipintCallSavedPL = PB
+
+    # Grab PL
+    pop ipintCallSavedPL
+
+    # Adjust sp to pop off arguments consumed
+    # (mint popped off ipintCallShadowSP)
+    loadh 2[PM], t5 # argument count
+    lshiftp 4, t5
+    addp t5, sp
+    addp 4, PM
+    mintRetDispatch()
 
 mintAlign(_r0)
 _mint_begin_return:
-    break
+    pushQuad(r1, r0)
+    mintRetDispatch()
 
 mintAlign(_r1)
     break
@@ -1390,7 +1523,20 @@ mintAlign(_stack)
     break
 
 mintAlign(_end)
-    break
+    # Stash away PM for later MC calculation
+    # (MC gets clobbered by getIPIntCallee())
+    push PM
+    # Restore PL
+    move ipintCallSavedPL, PL
+    # Restore PB/PM
+    getIPIntCallee()
+    loadp Wasm::IPIntCallee::m_bytecode[ws0], PB
+    loadp Wasm::IPIntCallee::m_metadata[ws0], PM
+    pop MC
+    subp PM, MC
+    # Restore memory
+    ipintReloadMemory()
+    nextIPIntInstruction()
 
 uintAlign(_r0)
 _uint_begin:
