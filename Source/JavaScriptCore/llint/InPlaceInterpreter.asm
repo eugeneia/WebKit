@@ -272,6 +272,9 @@ end
 # Exception handling
 
 macro ipintException(exception)
+    if ARMv7
+        loadp CodeBlock[cfr], wasmInstance
+    end
     storei constexpr Wasm::ExceptionType::%exception%, ArgumentCountIncludingThis + PayloadOffset[cfr]
     jmp _wasm_throw_from_slow_path_trampoline
 end
