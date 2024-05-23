@@ -103,19 +103,39 @@ end
 
 # Pushes ft0 because macros
 macro pushFPR()
-    break
+    if ARMv7
+        subp 16, sp
+        stored ft0, [sp]
+    else
+        break
+    end
 end
 
 macro pushFPR1()
-    break
+    if ARMv7
+        subp 16, sp
+        stored ft1, [sp]
+    else
+        break
+    end
 end
 
 macro popFPR()
-    break
+    if ARMv7
+        loadd [sp], ft0
+        addp 16, sp
+    else
+        break
+    end
 end
 
 macro popFPR1()
-    break
+    if ARMv7
+        loadd [sp], ft1
+        addp 16, sp
+    else
+        break
+    end
 end
 
 # Typed push/pop to make code pretty
@@ -419,7 +439,16 @@ instructionLabel(_i64_const)
     advanceMC(9)
     nextIPIntInstruction()
 
-unimplementedInstruction(_f32_const)
+instructionLabel(_f32_const)
+    # f32.const
+    # Load pre-computed value from metadata
+    loadi 1[PB, PC], t0 # NB: can be unaligned, hence loadi, fi2f instead of loadf (VLDR)
+    fi2f t0, ft0
+    pushFloat32FT0()
+
+    advancePC(5)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_f64_const)
 
     ###############################
@@ -1256,20 +1285,192 @@ instructionLabel(_i64_rotr)
     # 0x8b - 0x98: f32 operations #
     ###############################
 
-unimplementedInstruction(_f32_abs)
-unimplementedInstruction(_f32_neg)
-unimplementedInstruction(_f32_ceil)
-unimplementedInstruction(_f32_floor)
-unimplementedInstruction(_f32_trunc)
-unimplementedInstruction(_f32_nearest)
-unimplementedInstruction(_f32_sqrt)
-unimplementedInstruction(_f32_add)
-unimplementedInstruction(_f32_sub)
-unimplementedInstruction(_f32_mul)
-unimplementedInstruction(_f32_div)
-unimplementedInstruction(_f32_min)
-unimplementedInstruction(_f32_max)
-unimplementedInstruction(_f32_copysign)
+instructionLabel(_f32_abs)
+    # f32.abs
+    popFloat32FT0()
+    absf ft0, ft0
+    pushFloat32FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_neg)
+    # f32.neg
+    popFloat32FT0()
+    negf ft0, ft0
+    pushFloat32FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_ceil)
+    # f32.ceil
+    popFloat32FT0()
+    functionCall(macro () cCall2(_ceilFloat) end)
+    pushFloat32FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_floor)
+    # f32.floor
+    popFloat32FT0()
+    functionCall(macro () cCall2(_floorFloat) end)
+    pushFloat32FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_trunc)
+    # f32.trunc
+    popFloat32FT0()
+    functionCall(macro () cCall2(_truncFloat) end)
+    pushFloat32FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_nearest)
+    # f32.nearest
+    popFloat32FT0()
+    functionCall(macro () cCall2(_f32_nearest) end)
+    pushFloat32FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_sqrt)
+    # f32.sqrt
+    popFloat32FT0()
+    sqrtf ft0, ft0
+    pushFloat32FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_add)
+    # f32.add
+    popFloat32FT1()
+    popFloat32FT0()
+    addf ft1, ft0
+    pushFloat32FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_sub)
+    # f32.sub
+    popFloat32FT1()
+    popFloat32FT0()
+    subf ft1, ft0
+    pushFloat32FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_mul)
+    # f32.mul
+    popFloat32FT1()
+    popFloat32FT0()
+    mulf ft1, ft0
+    pushFloat32FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_div)
+    # f32.div
+    popFloat32FT1()
+    popFloat32FT0()
+    divf ft1, ft0
+    pushFloat32FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_min)
+    # f32.min
+    popFloat32FT1()
+    popFloat32FT0()
+    bfeq ft0, ft1, .ipint_f32_min_equal
+    bflt ft0, ft1, .ipint_f32_min_lt
+    bfgt ft0, ft1, .ipint_f32_min_return
+
+.ipint_f32_min_NaN:
+    addf ft0, ft1
+    pushFloat32FT1()
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_f32_min_equal:
+    orf ft0, ft1
+    pushFloat32FT1()
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_f32_min_lt:
+    moved ft0, ft1
+    pushFloat32FT1()
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_f32_min_return:
+    pushFloat32FT1()
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_max)
+    # f32.max
+    popFloat32FT1()
+    popFloat32FT0()
+
+    bfeq ft1, ft0, .ipint_f32_max_equal
+    bflt ft1, ft0, .ipint_f32_max_lt
+    bfgt ft1, ft0, .ipint_f32_max_return
+
+.ipint_f32_max_NaN:
+    addf ft0, ft1
+    pushFloat32FT1()
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_f32_max_equal:
+    andf ft0, ft1
+    pushFloat32FT1()
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_f32_max_lt:
+    moved ft0, ft1
+    pushFloat32FT1()
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_f32_max_return:
+    pushFloat32FT1()
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_copysign)
+    # f32.copysign
+    popFloat32FT1()
+    popFloat32FT0()
+
+    ff2i ft1, t1
+    move 0x80000000, t2
+    andi t2, t1
+
+    ff2i ft0, t0
+    move 0x7fffffff, t2
+    andi t2, t0
+
+    ori t1, t0
+    fi2f t0, ft0
+
+    pushFloat32FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
 
     ###############################
     # 0x99 - 0xa6: f64 operations #
@@ -1315,7 +1516,14 @@ unimplementedInstruction(_f64_convert_i32_u)
 unimplementedInstruction(_f64_convert_i64_s)
 unimplementedInstruction(_f64_convert_i64_u)
 unimplementedInstruction(_f64_promote_f32)
-unimplementedInstruction(_i32_reinterpret_f32)
+
+instructionLabel(_i32_reinterpret_f32)
+    popFloat32FT0()
+    ff2i ft0, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_i64_reinterpret_f64)
 unimplementedInstruction(_f32_reinterpret_i32)
 unimplementedInstruction(_f64_reinterpret_i64)
@@ -1890,7 +2098,6 @@ macro mintPop(hi, lo)
 end
 
 macro mintPopF(reg)
-    break
     loadd [t5], reg
     addp 16, t5
 end
@@ -1982,10 +2189,12 @@ mintAlign(_a7)
     break
 
 mintAlign(_fa0)
-    break
+    mintPopF(ft0)
+    mintArgDispatch()
 
 mintAlign(_fa1)
-    break
+    mintPopF(ft1)
+    mintArgDispatch()
 
 mintAlign(_fa2)
     break
@@ -2071,7 +2280,8 @@ mintAlign(_r7)
     break
 
 mintAlign(_fr0)
-    break
+    pushFPR()
+    mintRetDispatch()
 
 mintAlign(_fr1)
     break
@@ -2110,7 +2320,8 @@ uintAlign(_r1)
     break
 
 uintAlign(_fr1)
-    break
+    popFPR()
+    uintDispatch()
 
 uintAlign(_stack)
     break
@@ -2160,10 +2371,14 @@ argumINTAlign(_a7)
     break
 
 argumINTAlign(_fa0)
-    break
+    stored fa0, [argumINTDest]
+    addp 8, argumINTDest
+    argumINTDispatch()
 
 argumINTAlign(_fa1)
-    break
+    stored fa1, [argumINTDest]
+    addp 8, argumINTDest
+    argumINTDispatch()
 
 argumINTAlign(_fa2)
     break
