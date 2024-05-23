@@ -567,7 +567,7 @@ instructionLabel(_i32_ge_u)
 
 instructionLabel(_i64_eqz)
     # i64.eqz
-    popQuad(t1, t0)
+    popInt64(t1, t0)
     move 0, t2
     btinz t1, .ipint_i64_eqz_return
     cieq t0, 0, t2
@@ -578,8 +578,8 @@ instructionLabel(_i64_eqz)
 
 instructionLabel(_i64_eq)
     # i64.eq
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     move 0, t5
     bineq t1, t3, .ipint_i64_eq_return
     cieq t0, t2, t5
@@ -590,8 +590,8 @@ instructionLabel(_i64_eq)
 
 instructionLabel(_i64_ne)
     # i64.ne
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     move 1, t5
     bineq t1, t3, .ipint_i64_ne_return
     cineq t0, t2, t5
@@ -602,8 +602,8 @@ instructionLabel(_i64_ne)
 
 instructionLabel(_i64_lt_s)
     # i64.lt_s
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     move 1, t5
     bilt t1, t3, .ipint_i64_lt_s_return
     move 0, t5
@@ -616,8 +616,8 @@ instructionLabel(_i64_lt_s)
 
 instructionLabel(_i64_lt_u)
     # i64.lt_u
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     move 1, t5
     bib t1, t3, .ipint_i64_lt_u_return
     move 0, t5
@@ -630,8 +630,8 @@ instructionLabel(_i64_lt_u)
 
 instructionLabel(_i64_gt_s)
     # i64.gt_s
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     move 1, t5
     bigt t1, t3, .ipint_i64_gt_s_return
     move 0, t5
@@ -644,8 +644,8 @@ instructionLabel(_i64_gt_s)
 
 instructionLabel(_i64_gt_u)
     # i64.gt_u
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     move 1, t5
     bia t1, t3, .ipint_i64_gt_u_return
     move 0, t5
@@ -658,8 +658,8 @@ instructionLabel(_i64_gt_u)
 
 instructionLabel(_i64_le_s)
     # i64.le_s
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     move 1, t5
     bilt t1, t3, .ipint_i64_le_s_return
     move 0, t5
@@ -672,8 +672,8 @@ instructionLabel(_i64_le_s)
 
 instructionLabel(_i64_le_u)
     # i64.le_u
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     move 1, t5
     bib t1, t3, .ipint_i64_le_u_return
     move 0, t5
@@ -686,8 +686,8 @@ instructionLabel(_i64_le_u)
 
 instructionLabel(_i64_ge_s)
     # i64.ge_s
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     move 1, t5
     bigt t1, t3, .ipint_i64_ge_s_return
     move 0, t5
@@ -700,8 +700,8 @@ instructionLabel(_i64_ge_s)
 
 instructionLabel(_i64_ge_u)
     # i64.ge_u
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     move 0, t5
     bib t1, t3, .ipint_i64_ge_u_return
     move 1, t5
@@ -954,7 +954,7 @@ instructionLabel(_i32_rotr)
 
 instructionLabel(_i64_clz)
     # i64.clz
-    popQuad(t1, t0)
+    popInt64(t1, t0)
     btiz t1, .ipint_i64_clz_bottom
 
     lzcnti t1, t0
@@ -966,14 +966,14 @@ instructionLabel(_i64_clz)
 
 .ipint_i64_clz_return:
     move 0, t1
-    pushQuad(t1, t0)
+    pushInt64(t1, t0)
 
     advancePC(1)
     nextIPIntInstruction()
 
 instructionLabel(_i64_ctz)
     # i64.ctz
-    popQuad(t1, t0)
+    popInt64(t1, t0)
     btiz t0, .ipint_i64_ctz_top
 
     tzcnti t0, t0
@@ -985,61 +985,61 @@ instructionLabel(_i64_ctz)
 
 .ipint_i64_ctz_return:
     move 0, t1
-    pushQuad(t1, t0)
+    pushInt64(t1, t0)
 
     advancePC(1)
     nextIPIntInstruction()
 
 instructionLabel(_i64_popcnt)
     # i64.popcnt
-    popQuad(t3, t2)
+    popInt64(t3, t2)
     operationCall(macro() cCall2(_slow_path_wasm_popcountll) end)
     move 0, t0
-    pushQuad(t0, r1)
+    pushInt64(t0, r1)
 
     advancePC(1)
     nextIPIntInstruction()
 
 instructionLabel(_i64_add)
     # i64.add
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     addis t2, t0
     adci  t3, t1
-    pushQuad(t1, t0)
+    pushInt64(t1, t0)
 
     advancePC(1)
     nextIPIntInstruction()
 
 instructionLabel(_i64_sub)
     # i64.sub
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     subis t2, t0
     sbci  t3, t1
-    pushQuad(t1, t0)
+    pushInt64(t1, t0)
 
     advancePC(1)
     nextIPIntInstruction()
 
 instructionLabel(_i64_mul)
     # i64.mul
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     muli t2, t1
     muli t0, t3
     umulli t0, t2, t0, t2
     addi t1, t2
     addi t3, t2
-    pushQuad(t2, t0)
+    pushInt64(t2, t0)
 
     advancePC(1)
     nextIPIntInstruction()
 
 instructionLabel(_i64_div_s)
     # i64.div_s
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     btinz t3, .ipint_i64_div_s_nonZero
     btiz t2, .ipint_i64_div_s_throwDivisionByZero
 
@@ -1051,7 +1051,7 @@ instructionLabel(_i64_div_s)
 
 .ipint_i64_div_s_safe:
     functionCall(macro () cCall4(_i64_div_s) end)
-    pushQuad(t1, t0)
+    pushInt64(t1, t0)
     advancePC(1)
     nextIPIntInstruction()
 
@@ -1063,14 +1063,14 @@ instructionLabel(_i64_div_s)
 
 instructionLabel(_i64_div_u)
     # i64.div_u
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     btinz t3, .ipint_i64_div_u_nonZero
     btiz t2, .ipint_i64_div_u_throwDivisionByZero
 
 .ipint_i64_div_u_nonZero:
     functionCall(macro () cCall4(_i64_div_u) end)
-    pushQuad(t1, t0)
+    pushInt64(t1, t0)
     advancePC(1)
     nextIPIntInstruction()
 
@@ -1079,8 +1079,8 @@ instructionLabel(_i64_div_u)
 
 instructionLabel(_i64_rem_s)
     # i64.rem_s
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     btinz t3, .ipint_i64_rem_s_nonZero
     btiz t2, .ipint_i64_rem_s_throwDivisionByZero
 
@@ -1097,7 +1097,7 @@ instructionLabel(_i64_rem_s)
     functionCall(macro () cCall4(_i64_rem_s) end)
 
 .ipint_i64_rem_s_return:
-    pushQuad(t1, t0)
+    pushInt64(t1, t0)
     advancePC(1)
     nextIPIntInstruction()
 
@@ -1106,14 +1106,14 @@ instructionLabel(_i64_rem_s)
 
 instructionLabel(_i64_rem_u)
     # i64.rem_u
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     btinz t3, .ipint_i64_rem_u_nonZero
     btiz t2, .ipint_i64_rem_u_throwDivisionByZero
 
 .ipint_i64_rem_u_nonZero:
     functionCall(macro () cCall4(_i64_rem_u) end)
-    pushQuad(t1, t0)
+    pushInt64(t1, t0)
     advancePC(1)
     nextIPIntInstruction()
 
@@ -1122,33 +1122,33 @@ instructionLabel(_i64_rem_u)
 
 instructionLabel(_i64_and)
     # i64.and
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     andi t3, t1
     andi t2, t0
-    pushQuad(t1, t0)
+    pushInt64(t1, t0)
 
     advancePC(1)
     nextIPIntInstruction()
 
 instructionLabel(_i64_or)
     # i64.or
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     ori t3, t1
     ori t2, t0
-    pushQuad(t1, t0)
+    pushInt64(t1, t0)
 
     advancePC(1)
     nextIPIntInstruction()
 
 instructionLabel(_i64_xor)
     # i64.xor
-    popQuad(t3, t2)
-    popQuad(t1, t0)
+    popInt64(t3, t2)
+    popInt64(t1, t0)
     xori t3, t1
     xori t2, t0
-    pushQuad(t1, t0)
+    pushInt64(t1, t0)
 
     advancePC(1)
     nextIPIntInstruction()
@@ -1156,7 +1156,7 @@ instructionLabel(_i64_xor)
 instructionLabel(_i64_shl)
     # i64.shl
     popInt32(t2)
-    popQuad(t1, t0)
+    popInt64(t1, t0)
     andi 0x3f, t2
     btiz t2, .ipint_i64_shl_return
     bib t2, 32, .ipint_i64_lessThan32
@@ -1175,14 +1175,14 @@ instructionLabel(_i64_shl)
     lshifti t2, t0
 
 .ipint_i64_shl_return:
-    pushQuad(t1, t0)
+    pushInt64(t1, t0)
     advancePC(1)
     nextIPIntInstruction()
 
 instructionLabel(_i64_shr_s)
     # i64.shr_s
     popInt32(t2)
-    popQuad(t1, t0)
+    popInt64(t1, t0)
     andi 0x3f, t2
     btiz t2, .ipint_i64_shr_s_return
     bib t2, 32, .ipint_i64_shr_s_lessThan32
@@ -1201,14 +1201,14 @@ instructionLabel(_i64_shr_s)
     rshifti t2, t1
 
 .ipint_i64_shr_s_return:
-    pushQuad(t1, t0)
+    pushInt64(t1, t0)
     advancePC(1)
     nextIPIntInstruction()
 
 instructionLabel(_i64_shr_u)
     # i64.shr_u
     popInt32(t2)
-    popQuad(t1, t0)
+    popInt64(t1, t0)
     andi 0x3f, t2
     btiz t2, .ipint_i64_shr_u_return
     bib t2, 32, .ipint_i64_shr_u_lessThan32
@@ -1227,14 +1227,14 @@ instructionLabel(_i64_shr_u)
     urshifti t2, t1
 
 .ipint_i64_shr_u_return:
-    pushQuad(t1, t0)
+    pushInt64(t1, t0)
     advancePC(1)
     nextIPIntInstruction()
 
 instructionLabel(_i64_rotl)
     # i64.rotl
     popInt32(t2)
-    popQuad(t1, t0)
+    popInt64(t1, t0)
     andi t2, 0x20, t3
     btiz t3, .ipint_i64_rotl_noSwap
 
@@ -1256,14 +1256,14 @@ instructionLabel(_i64_rotl)
     ori t3, t1
 
 .ipint_i64_rotl_return:
-    pushQuad(t1, t0)
+    pushInt64(t1, t0)
     advancePC(1)
     nextIPIntInstruction()
 
 instructionLabel(_i64_rotr)
     # i64.rotr
     popInt32(t2)
-    popQuad(t1, t0)
+    popInt64(t1, t0)
     andi t2, 0x20, t3
     btiz t3, .ipint_i64_rotr_noSwap
 
@@ -1285,7 +1285,7 @@ instructionLabel(_i64_rotr)
     ori t3, t1
 
 .ipint_i64_rotr_return:
-    pushQuad(t1, t0)
+    pushInt64(t1, t0)
     advancePC(1)
     nextIPIntInstruction()
 
@@ -1730,7 +1730,7 @@ instructionLabel(_i64_extend8_s)
     popInt32(t0)
     sxb2i t0, t0
     rshifti t0, 31, t1
-    pushQuad(t1, t0)
+    pushInt64(t1, t0)
     advancePC(1)
     nextIPIntInstruction()
 
@@ -1739,7 +1739,7 @@ instructionLabel(_i64_extend16_s)
     popInt32(t0)
     sxh2i t0, t0
     rshifti t0, 31, t1
-    pushQuad(t1, t0)
+    pushInt64(t1, t0)
     advancePC(1)
     nextIPIntInstruction()
 
@@ -1747,7 +1747,7 @@ instructionLabel(_i64_extend32_s)
     # i64.extend8_s
     popInt32(t0)
     rshifti t0, 31, t1
-    pushQuad(t1, t0)
+    pushInt64(t1, t0)
     advancePC(1)
     nextIPIntInstruction()
 
