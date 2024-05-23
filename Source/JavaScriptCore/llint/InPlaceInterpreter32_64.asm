@@ -449,7 +449,15 @@ instructionLabel(_f32_const)
     advancePC(5)
     nextIPIntInstruction()
 
-unimplementedInstruction(_f64_const)
+instructionLabel(_f64_const)
+    # f64.const
+    # Load pre-computed value from metadata
+    load2ia 1[PB, PC], t0, t1
+    fii2d t0, t1, ft0
+    pushFloat64FT0()
+
+    advancePC(9)
+    nextIPIntInstruction()
 
     ###############################
     # 0x45 - 0x4f: i32 comparison #
@@ -1476,20 +1484,187 @@ instructionLabel(_f32_copysign)
     # 0x99 - 0xa6: f64 operations #
     ###############################
 
-unimplementedInstruction(_f64_abs)
-unimplementedInstruction(_f64_neg)
-unimplementedInstruction(_f64_ceil)
-unimplementedInstruction(_f64_floor)
-unimplementedInstruction(_f64_trunc)
-unimplementedInstruction(_f64_nearest)
-unimplementedInstruction(_f64_sqrt)
-unimplementedInstruction(_f64_add)
-unimplementedInstruction(_f64_sub)
-unimplementedInstruction(_f64_mul)
-unimplementedInstruction(_f64_div)
-unimplementedInstruction(_f64_min)
-unimplementedInstruction(_f64_max)
-unimplementedInstruction(_f64_copysign)
+instructionLabel(_f64_abs)
+    # f64.abs
+    popFloat64FT0()
+    absd ft0, ft0
+    pushFloat64FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f64_neg)
+    # f64.neg
+    popFloat64FT0()
+    negd ft0, ft0
+    pushFloat64FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f64_ceil)
+    # f64.ceil
+    popFloat64FT0()
+    functionCall(macro () cCall2(_ceilDouble) end)
+    pushFloat64FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f64_floor)
+    # f64.floor
+    popFloat64FT0()
+    functionCall(macro () cCall2(_floorDouble) end)
+    pushFloat64FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f64_trunc)
+    # f64.trunc
+    popFloat64FT0()
+    functionCall(macro () cCall2(_truncDouble) end)
+    pushFloat64FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f64_nearest)
+    # f64.nearest
+    popFloat64FT0()
+    functionCall(macro () cCall2(_f64_nearest) end)
+    pushFloat64FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f64_sqrt)
+    # f64.sqrt
+    popFloat64FT0()
+    sqrtd ft0, ft0
+    pushFloat64FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f64_add)
+    # f64.add
+    popFloat64FT1()
+    popFloat64FT0()
+    addd ft1, ft0
+    pushFloat64FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f64_sub)
+    # f64.sub
+    popFloat64FT1()
+    popFloat64FT0()
+    subd ft1, ft0
+    pushFloat64FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f64_mul)
+    # f64.mul
+    popFloat64FT1()
+    popFloat64FT0()
+    muld ft1, ft0
+    pushFloat64FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f64_div)
+    # f64.div
+    popFloat64FT1()
+    popFloat64FT0()
+    divd ft1, ft0
+    pushFloat64FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f64_min)
+    # f64.min
+    popFloat64FT1()
+    popFloat64FT0()
+    bdeq ft0, ft1, .ipint_f64_min_equal
+    bdlt ft0, ft1, .ipint_f64_min_lt
+    bdgt ft0, ft1, .ipint_f64_min_return
+
+.ipint_f64_min_NaN:
+    addd ft0, ft1
+    pushFloat64FT1()
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_f64_min_equal:
+    ord ft0, ft1
+    pushFloat64FT1()
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_f64_min_lt:
+    moved ft0, ft1
+    pushFloat64FT1()
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_f64_min_return:
+    pushFloat64FT1()
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f64_max)
+    # f64.max
+    popFloat64FT1()
+    popFloat64FT0()
+
+    bdeq ft1, ft0, .ipint_f64_max_equal
+    bdlt ft1, ft0, .ipint_f64_max_lt
+    bdgt ft1, ft0, .ipint_f64_max_return
+
+.ipint_f64_max_NaN:
+    addd ft0, ft1
+    pushFloat64FT1()
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_f64_max_equal:
+    andd ft0, ft1
+    pushFloat64FT1()
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_f64_max_lt:
+    moved ft0, ft1
+    pushFloat64FT1()
+    advancePC(1)
+    nextIPIntInstruction()
+
+.ipint_f64_max_return:
+    pushFloat64FT1()
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f64_copysign)
+    # f64.copysign
+    popFloat64FT1()
+    popFloat64FT0()
+
+    fd2ii ft1, t2, t3
+    fd2ii ft0, t0, t1
+    andi 0x7fffffff, t1
+    andi 0x80000000, t3
+    ori t3, t1
+
+    pushFloat64FT0()
+
+    advancePC(1)
+    nextIPIntInstruction()
 
     ############################
     # 0xa7 - 0xc4: conversions #
@@ -1524,7 +1699,13 @@ instructionLabel(_i32_reinterpret_f32)
     advancePC(1)
     nextIPIntInstruction()
 
-unimplementedInstruction(_i64_reinterpret_f64)
+instructionLabel(_i64_reinterpret_f64)
+    popFloat64FT0()
+    fd2ii ft0, t0, t1
+    pushInt64(t1, t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_f32_reinterpret_i32)
 unimplementedInstruction(_f64_reinterpret_i64)
 
