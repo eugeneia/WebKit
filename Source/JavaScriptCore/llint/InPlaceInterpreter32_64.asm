@@ -716,23 +716,117 @@ instructionLabel(_i64_ge_u)
     # 0x5b - 0x60: f32 comparison #
     ###############################
 
-unimplementedInstruction(_f32_eq)
-unimplementedInstruction(_f32_ne)
-unimplementedInstruction(_f32_lt)
-unimplementedInstruction(_f32_gt)
-unimplementedInstruction(_f32_le)
-unimplementedInstruction(_f32_ge)
+instructionLabel(_f32_eq)
+    # f32.eq
+    popFloat32FT1()
+    popFloat32FT0()
+    cfeq ft0, ft1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_ne)
+    # f32.ne
+    popFloat32FT1()
+    popFloat32FT0()
+    cfnequn ft0, ft1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_lt)
+    # f32.lt
+    popFloat32FT1()
+    popFloat32FT0()
+    cflt ft0, ft1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_gt)
+    # f32.gt
+    popFloat32FT1()
+    popFloat32FT0()
+    cfgt ft0, ft1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_le)
+    # f32.le
+    popFloat32FT1()
+    popFloat32FT0()
+    cflteq ft0, ft1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_ge)
+    # f32.ge
+    popFloat32FT1()
+    popFloat32FT0()
+    cfgteq ft0, ft1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
 
     ###############################
     # 0x61 - 0x66: f64 comparison #
     ###############################
 
-unimplementedInstruction(_f64_eq)
-unimplementedInstruction(_f64_ne)
-unimplementedInstruction(_f64_lt)
-unimplementedInstruction(_f64_gt)
-unimplementedInstruction(_f64_le)
-unimplementedInstruction(_f64_ge)
+instructionLabel(_f64_eq)
+    # f64.eq
+    popFloat64FT1()
+    popFloat64FT0()
+    cdeq ft0, ft1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f64_ne)
+    # f64.ne
+    popFloat64FT1()
+    popFloat64FT0()
+    cdnequn ft0, ft1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f64_lt)
+    # f64.lt
+    popFloat64FT1()
+    popFloat64FT0()
+    cdlt ft0, ft1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f64_gt)
+    # f64.gt
+    popFloat64FT1()
+    popFloat64FT0()
+    cdgt ft0, ft1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f64_le)
+    # f64.le
+    popFloat64FT1()
+    popFloat64FT0()
+    cdlteq ft0, ft1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_f64_ge)
+    # f64.ge
+    popFloat64FT1()
+    popFloat64FT0()
+    cdgteq ft0, ft1, t0
+    pushInt32(t0)
+    advancePC(1)
+    nextIPIntInstruction()
 
     ###############################
     # 0x67 - 0x78: i32 operations #
