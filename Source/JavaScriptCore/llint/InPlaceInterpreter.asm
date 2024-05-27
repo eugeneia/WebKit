@@ -97,6 +97,9 @@ const wasmInstance = csr0
 if X86_64 or ARM64 or ARM64E or RISCV64
     const memoryBase = csr3
     const boundsCheckingSize = csr4
+elsif ARMv7
+    const memoryBase = t2
+    const boundsCheckingSize = t3
 else
     const memoryBase = invalidGPR
     const boundsCheckingSize = invalidGPR

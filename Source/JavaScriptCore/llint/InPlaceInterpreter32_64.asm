@@ -368,20 +368,260 @@ unimplementedInstruction(_global_set)
 unimplementedInstruction(_table_get)
 unimplementedInstruction(_table_set)
 reservedOpcode(0x27)
-unimplementedInstruction(_i32_load_mem)
-unimplementedInstruction(_i64_load_mem)
-unimplementedInstruction(_f32_load_mem)
-unimplementedInstruction(_f64_load_mem)
-unimplementedInstruction(_i32_load8s_mem)
-unimplementedInstruction(_i32_load8u_mem)
-unimplementedInstruction(_i32_load16s_mem)
-unimplementedInstruction(_i32_load16u_mem)
-unimplementedInstruction(_i64_load8s_mem)
-unimplementedInstruction(_i64_load8u_mem)
-unimplementedInstruction(_i64_load16s_mem)
-unimplementedInstruction(_i64_load16u_mem)
-unimplementedInstruction(_i64_load32s_mem)
-unimplementedInstruction(_i64_load32u_mem)
+
+macro ipintWithMemory()
+    loadp CodeBlock[cfr], t3
+    load2ia Wasm::Instance::m_cachedMemory[t3], memoryBase, boundsCheckingSize
+end
+
+# NB: mutates mem to be mem + offset, clobbers offset
+macro ipintMaterializePtrAndCheckMemoryBound(mem, offset, size)
+    addps offset, mem
+    bcs .outOfBounds
+    addps size - 1, mem, offset
+    bcs .outOfBounds
+    bpb offset, boundsCheckingSize, .continuation
+.outOfBounds:
+    ipintException(OutOfBoundsMemoryAccess)
+.continuation:
+end
+
+instructionLabel(_i32_load_mem)
+    # i32.load
+    # pop index
+    popInt32(t0)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t0, t1, 4)
+    # load memory location
+    loadi [memoryBase, t0], t1
+    pushInt32(t1)
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_load_mem)
+    # i32.load
+    # pop index
+    popInt32(t0)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t0, t1, 8)
+    # load memory location
+    load2ia [memoryBase, t0], t0, t1
+    pushInt64(t1, t0)
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_load_mem)
+    # f32.load
+    # pop index
+    popInt32(t0)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t0, t1, 4)
+    # load memory location
+    loadi [memoryBase, t0], t0 # NB: can be unaligned, hence loadi, fi2f instead of loadf (VLDR)
+    fi2f t0, ft0
+    pushFloat32FT0()
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+    
+instructionLabel(_f64_load_mem)
+    # f64.load
+    # pop index
+    popInt32(t0)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t0, t1, 8)
+    # load memory location
+    load2ia [memoryBase, t0], t0, t1 # NB: can be unaligned, hence loadi, fii2d instead of loadd
+    fii2d t0, t1, ft0
+    pushFloat64FT0()
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_load8s_mem)
+    # i32.load8_s
+    # pop index
+    popInt32(t0)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t0, t1, 1)
+    # load memory location
+    loadb [memoryBase, t0], t1
+    sxb2i t1, t1
+    pushInt32(t1)
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_load8u_mem)
+    # i32.load8_u
+    # pop index
+    popInt32(t0)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t0, t1, 1)
+    # load memory location
+    loadb [memoryBase, t0], t1
+    pushInt32(t1)
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_load16s_mem)
+    # i32.load16_s
+    # pop index
+    popInt32(t0)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t0, t1, 2)
+    # load memory location
+    loadh [memoryBase, t0], t1
+    sxh2i t1, t1
+    pushInt32(t1)
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_load16u_mem)
+    # i32.load16_u
+    # pop index
+    popInt32(t0)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t0, t1, 2)
+    # load memory location
+    loadh [memoryBase, t0], t1
+    pushInt32(t1)
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_load8s_mem)
+    # i64.load8_s
+    # pop index
+    popInt32(t0)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t0, t1, 1)
+    # load memory location
+    loadb [memoryBase, t0], t0
+    sxb2i t0, t0
+    rshifti t0, 31, t1
+    pushInt64(t1, t0)
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_load8u_mem)
+    # i64.load8_u
+    # pop index
+    popInt32(t0)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t0, t1, 1)
+    # load memory location
+    loadb [memoryBase, t0], t0
+    move 0, t1
+    pushInt64(t1, t0)
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_load16s_mem)
+    # i64.load16_s
+    # pop index
+    popInt32(t0)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t0, t1, 1)
+    # load memory location
+    loadh [memoryBase, t0], t0
+    sxh2i t0, t0
+    rshifti t0, 31, t1
+    pushInt64(t1, t0)
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_load16u_mem)
+    # i64.load16_u
+    # pop index
+    popInt32(t0)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t0, t1, 1)
+    # load memory location
+    loadh [memoryBase, t0], t0
+    move 0, t1
+    pushInt64(t1, t0)
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_load32s_mem)
+    # i64.load32_s
+    # pop index
+    popInt32(t0)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t0, t1, 1)
+    # load memory location
+    loadi [memoryBase, t0], t0
+    rshifti t0, 31, t1
+    pushInt64(t1, t0)
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_load32u_mem)
+    # i64.load8_s
+    # pop index
+    popInt32(t0)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t0, t1, 1)
+    # load memory location
+    loadi [memoryBase, t0], t0
+    move 0, t1
+    pushInt64(t1, t0)
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_i32_store_mem)
 unimplementedInstruction(_i64_store_mem)
 unimplementedInstruction(_f32_store_mem)
@@ -452,7 +692,7 @@ instructionLabel(_f32_const)
 instructionLabel(_f64_const)
     # f64.const
     # Load pre-computed value from metadata
-    load2ia 1[PB, PC], t0, t1
+    load2ia 1[PB, PC], t0, t1 # NB: can be unaligned, hence loadi, fii2d instead of loadd
     fii2d t0, t1, ft0
     pushFloat64FT0()
 
