@@ -72,7 +72,7 @@ end
 
 macro popQuad(reg, scratch)
     if ARM64 or ARM64E
-        pop reg, scratch
+        pop scratch, reg
     elsif X86_64
         pop reg
     else
