@@ -55,10 +55,6 @@ macro pushDouble(reg)
     end
 end
 
-macro pushQuadPair(reg1, reg2)
-    break
-end
-
 macro popQuad(hi, lo)
     if ARMv7
         load2ia [sp], lo, hi
@@ -138,7 +134,19 @@ macro popFPR1()
     end
 end
 
-# Typed push/pop to make code pretty
+macro peekDouble(i, reg)
+    if ARMv7
+        loadi (i*16)[sp], reg
+    else
+        break
+    end
+end
+
+macro drop()
+    addp 16, sp
+end
+
+# Typed push/pop/peek to make code pretty
 
 macro pushInt32(reg)
     pushDouble(reg)
@@ -146,6 +154,10 @@ end
 
 macro popInt32(reg)
     popDouble(reg)
+end
+
+macro peekInt32(i, reg)
+    peekDouble(i, reg)
 end
 
 macro pushInt64(hi, lo)
@@ -228,7 +240,21 @@ instructionLabel(_block)
     nextIPIntInstruction()
 
 unimplementedInstruction(_loop)
-unimplementedInstruction(_if)
+
+instructionLabel(_if)
+    # if
+    popInt32(t0)
+    bpneq 0, t0, .ipint_if_taken
+    loadi [PM, MC], PC
+    loadi 4[PM, MC], MC
+    nextIPIntInstruction()
+.ipint_if_taken:
+    # Skip LEB128
+    loadb 8[PM, MC], t0
+    advanceMC(9)
+    advancePCByReg(t0)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_else)
 unimplementedInstruction(_try)
 unimplementedInstruction(_catch)
@@ -311,7 +337,20 @@ instructionLabel(_br_if)
     advancePCByReg(t0)
     nextIPIntInstruction()
 
-unimplementedInstruction(_br_table)
+instructionLabel(_br_table)
+    # br_table
+    popInt32(t0)
+    loadi [PM, MC], t1
+    advanceMC(4)
+    bib t0, t1, .ipint_br_table_clamped
+    subp t1, 1, t0
+.ipint_br_table_clamped:
+    move t0, t1
+    lshiftp 3, t0
+    lshiftp 2, t1
+    addp t1, t0
+    addp t0, MC
+    jmp _ipint_br
 
 instructionLabel(_return)
     loadp UnboxedWasmCalleeStackSlot[cfr], ws0
@@ -361,7 +400,18 @@ instructionLabel(_local_get)
     pushQuad(t1, t0)
     nextIPIntInstruction()
 
-unimplementedInstruction(_local_set)
+instructionLabel(_local_set)
+    # local.set
+    loadb 1[PB, PC], t0
+    advancePC(2)
+    bbaeq t0, 128, _ipint_local_set_slow_path
+.ipint_local_set_post_decode:
+    # Pop from stack
+    popQuad(t3, t2)
+    # Store to locals
+    store2ia t2, t3, [PL, t0, LocalSize]
+    nextIPIntInstruction()
+
 unimplementedInstruction(_local_tee)
 unimplementedInstruction(_global_get)
 unimplementedInstruction(_global_set)
@@ -622,15 +672,163 @@ instructionLabel(_i64_load32u_mem)
     advanceMC(5)
     nextIPIntInstruction()
 
-unimplementedInstruction(_i32_store_mem)
-unimplementedInstruction(_i64_store_mem)
-unimplementedInstruction(_f32_store_mem)
-unimplementedInstruction(_f64_store_mem)
-unimplementedInstruction(_i32_store8_mem)
-unimplementedInstruction(_i32_store16_mem)
-unimplementedInstruction(_i64_store8_mem)
-unimplementedInstruction(_i64_store16_mem)
-unimplementedInstruction(_i64_store32_mem)
+instructionLabel(_i32_store_mem)
+    # i32.store
+    # pop data
+    popInt32(t0)
+    # pop index
+    popInt32(t5)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t5, t1, 4)
+    # store at memory location
+    storei t0, [memoryBase, t5]
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_store_mem)
+    # i64.store
+    # peek index
+    peekInt32(1, t5)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t5, t1, 8)
+    # pop data
+    popInt64(t1, t0)
+    # drop index
+    drop()
+    # store at memory location
+    store2ia t0, t1, [memoryBase, t5]
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
+instructionLabel(_f32_store_mem)
+    # f32.store
+    # pop data
+    popFloat32FT0()
+    # pop index
+    popInt32(t0)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t0, t1, 4)
+    # store at memory location
+    ff2i ft0, t1 # NB: can be unaligned, hence ff2i, storei instead of storef (VSTR)
+    storei t1, [memoryBase, t0]
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
+instructionLabel(_f64_store_mem)
+    # f64.store
+    # pop data
+    popFloat64FT0()
+    # pop index
+    popInt32(t5)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t5, t1, 8)
+    # store at memory location
+    fd2ii ft0, t0, t1 # NB: can be unaligned, hence fd2ii, store2ia instead of stored
+    store2ia t0, t1, [memoryBase, t5]
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_store8_mem)
+    # i32.store8
+    # pop data
+    popInt32(t0)
+    # pop index
+    popInt32(t5)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t5, t1, 1)
+    # store at memory location
+    storeb t0, [memoryBase, t5]
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
+instructionLabel(_i32_store16_mem)
+    # i32.store16
+    # pop data
+    popInt32(t0)
+    # pop index
+    popInt32(t5)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t5, t1, 2)
+    # store at memory location
+    storeh t0, [memoryBase, t5]
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+    
+instructionLabel(_i64_store8_mem)
+    # i64.store8
+    # pop data
+    popInt32(t0)
+    # pop index
+    popInt32(t5)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t5, t1, 1)
+    # store at memory location
+    storeb t0, [memoryBase, t5]
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_store16_mem)
+    # i64.store16
+    # pop data
+    popInt32(t0)
+    # pop index
+    popInt32(t5)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t5, t1, 2)
+    # store at memory location
+    storeh t0, [memoryBase, t5]
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
+instructionLabel(_i64_store32_mem)
+    # i64.store32
+    # pop data
+    popInt32(t0)
+    # pop index
+    popInt32(t5)
+    loadi 1[PM, MC], t1
+    ipintWithMemory()
+    ipintMaterializePtrAndCheckMemoryBound(t5, t1, 4)
+    # store at memory location
+    storei t0, [memoryBase, t5]
+
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(5)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_memory_size)
 
 instructionLabel(_memory_grow)
