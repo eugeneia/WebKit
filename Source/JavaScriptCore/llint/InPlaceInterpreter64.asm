@@ -455,20 +455,14 @@ instructionLabel(_br_table)
     popInt32(t0, t2)
     loadi [PM, MC], t1
     advanceMC(4)
-    biaeq t0, t1, .ipint_br_table_maxout
+    bib t0, t1, .ipint_br_table_clamped
+    subq t1, 1, t0
+.ipint_br_table_clamped:
     move t0, t1
     lshiftq 3, t0
     lshiftq 2, t1
     addq t1, t0
     addq t0, MC
-    jmp _ipint_br
-.ipint_br_table_maxout:
-    subq 1, t1
-    move t1, t2
-    lshiftq 3, t1
-    lshiftq 2, t2
-    addq t2, t1
-    addq t1, MC
     jmp _ipint_br
 
 instructionLabel(_return)
