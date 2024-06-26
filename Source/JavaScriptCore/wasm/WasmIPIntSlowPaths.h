@@ -29,6 +29,7 @@
 
 #include "CommonSlowPaths.h"
 #include "WasmExceptionType.h"
+#include "WasmIPIntGenerator.h"
 #include "WasmTypeDefinition.h"
 #include <wtf/StdLibExtras.h>
 
@@ -79,7 +80,7 @@ WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(table_copy, int32_t*, int32_t, int64_t);
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(table_size, int32_t);
 
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(call_indirect, CallFrame* callFrame, unsigned functionIndex, unsigned* metadataEntry);
-WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(call, unsigned);
+WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(call, unsigned functionIndex, Register* sp, unsigned stackArgs);
 
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(set_global_ref, uint32_t globalIndex, JSValue value);
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(get_global_64, unsigned);

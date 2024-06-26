@@ -568,11 +568,12 @@ WASM_IPINT_EXTERN_CPP_DECL(table_size, int32_t tableIndex)
 #endif
 }
 
-static inline UGPRPair doWasmCall(Wasm::Instance* instance, unsigned functionIndex)
+static inline UGPRPair doWasmCall(Wasm::Instance* instance, unsigned functionIndex, Register* sp, unsigned stackArgs)
 {
     uint32_t importFunctionCount = instance->module().moduleInformation().importFunctionCount();
 
     CodePtr<WasmEntryPtrTag> codePtr;
+    EncodedJSValue boxedCallee = CalleeBits::encodeNullCallee();
 
     if (functionIndex < importFunctionCount) {
         Wasm::Instance::ImportFunctionInfo* functionInfo = instance->importFunctionInfo(functionIndex);
@@ -580,14 +581,20 @@ static inline UGPRPair doWasmCall(Wasm::Instance* instance, unsigned functionInd
     } else {
         // Target is a wasm function within the same instance
         codePtr = *instance->calleeGroup()->entrypointLoadLocationFromFunctionIndexSpace(functionIndex);
+        boxedCallee = CalleeBits::encodeNativeCallee(
+            instance->calleeGroup()->wasmCalleeFromFunctionIndexSpace(functionIndex));
     }
+
+    Register* partiallyConstructedCalleeFrame = &sp[-safeCast<int>(CallFrameSlot::firstArgument + stackArgs)];
+    Register& calleeStackSlot = partiallyConstructedCalleeFrame[static_cast<int>(CallFrameSlot::callee)];
+    calleeStackSlot = boxedCallee;
 
     WASM_CALL_RETURN(instance, codePtr.taggedPtr(), WasmEntryPtrTag);
 }
 
-WASM_IPINT_EXTERN_CPP_DECL(call, unsigned functionIndex)
+WASM_IPINT_EXTERN_CPP_DECL(call, unsigned functionIndex, Register* sp, unsigned stackArgs)
 {
-    return doWasmCall(instance, functionIndex);
+    return doWasmCall(instance, functionIndex, sp, stackArgs);
 }
 
 WASM_IPINT_EXTERN_CPP_DECL(call_indirect, CallFrame* callFrame, unsigned functionIndex, unsigned* metadataEntry)

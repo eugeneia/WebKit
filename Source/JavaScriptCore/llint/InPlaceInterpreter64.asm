@@ -5069,8 +5069,14 @@ _ipint_call_impl:
     advancePCByReg(t1)
     advanceMC(5)
 
+    # number of stack slots
+    loadh [PM, MC], wa3
+    advanceMC(2)
+    # sp (-16 because we will push PL, wasmInstance)
+    subp sp, 16, a2
     # Get function data
     move t0, a1
+    # instance
     move wasmInstance, a0
     operationCall(macro() cCall2(_ipint_extern_call) end)
 

@@ -38,6 +38,32 @@ struct ModuleInformation;
 
 Expected<std::unique_ptr<FunctionIPIntMetadataGenerator>, String> parseAndCompileMetadata(std::span<const uint8_t>, const TypeDefinition&, ModuleInformation&, uint32_t functionIndex);
 
+namespace IPInt {
+
+enum class MINTCall : uint8_t {
+    // Metadata structure for calls:
+    // mINT: mini-interpreter / minimalist interpreter (whichever floats your boat)
+    // 2B for number of arguments on stack (to set up callee frame)
+    a = 0x0,          // 0x00 - 0x07: push into a0, a1, ...
+    fa = 0x8,         // 0x08 - 0x0b: push into fa0, fa1, ...
+    stackzero = 0xc,  // 0x0c: pop stack value, push onto stack[0]
+    stackeight = 0xd, // 0x0d: pop stack value, add another 16B for params, push onto stack[8]
+    gap = 0xe,        // 0x0e: add another 16B for params
+    call = 0xf        // 0x0f: stop
+};
+
+enum class MINTReturn : uint8_t {
+    // Metadata structure for returns:
+    // 2B for number of arguments on stack (to clean up current call frame)
+    // 2B for number of arguments (to take off arguments)
+    r = 0x0,     // 0x00 - 0x07: r0 - r7
+    fr = 0x8,    // 0x08 - 0x0b: fr0 - fr3
+    stack = 0xc, // 0x0c: stack
+    end = 0xd    // 0x0d: end
+};
+
+} // namespace JSC::Wasm::IPInt
+
 } } // namespace JSC::Wasm
 
 #endif // ENABLE(WEBASSEMBLY[:w
