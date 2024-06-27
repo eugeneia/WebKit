@@ -27,6 +27,7 @@
 
 #if ENABLE(WEBASSEMBLY)
 
+#include "WasmCallingConvention.h"
 #include <wtf/Expected.h>
 #include <wtf/text/WTFString.h>
 
@@ -38,12 +39,21 @@ struct ModuleInformation;
 
 Expected<std::unique_ptr<FunctionIPIntMetadataGenerator>, String> parseAndCompileMetadata(std::span<const uint8_t>, const TypeDefinition&, ModuleInformation&, uint32_t functionIndex);
 
+} // namespace JSC::Wasm
+
 namespace IPInt {
 
+#pragma pack(1)
+
+// mINT: mini-interpreter / minimalist interpreter (whichever floats your boat)
+
+// Metadata structure for calls:
+
+struct MDCallCommonCall {
+    uint16_t stackSlots; // 2B for number of arguments on stack (to set up callee frame)
+};
+
 enum class MINTCall : uint8_t {
-    // Metadata structure for calls:
-    // mINT: mini-interpreter / minimalist interpreter (whichever floats your boat)
-    // 2B for number of arguments on stack (to set up callee frame)
     a = 0x0,          // 0x00 - 0x07: push into a0, a1, ...
     fa = 0x8,         // 0x08 - 0x0b: push into fa0, fa1, ...
     stackzero = 0xc,  // 0x0c: pop stack value, push onto stack[0]
@@ -52,18 +62,55 @@ enum class MINTCall : uint8_t {
     call = 0xf        // 0x0f: stop
 };
 
+// Metadata structure for returns:
+
+struct MDCallCommonReturn {
+    uint16_t stackSlots;    // 2B for number of arguments on stack (to clean up current call frame)
+    uint16_t argumentCount; // 2B for number of arguments (to take off arguments)
+};
+
 enum class MINTReturn : uint8_t {
-    // Metadata structure for returns:
-    // 2B for number of arguments on stack (to clean up current call frame)
-    // 2B for number of arguments (to take off arguments)
     r = 0x0,     // 0x00 - 0x07: r0 - r7
     fr = 0x8,    // 0x08 - 0x0b: fr0 - fr3
     stack = 0xc, // 0x0c: stack
     end = 0xd    // 0x0d: end
 };
 
-} // namespace JSC::Wasm::IPInt
+// Metadata structure for calls:
 
-} } // namespace JSC::Wasm
+struct MDCall {
+    // Function index:
+    uint8_t length;         // 1B for instruction length
+    uint32_t functionIndex; // 4B for decoded index
+};
+
+// Metadata structure for indirect calls:
+
+struct MDCallIndirect {
+    // Function index:
+    uint8_t length;       // 1B for length
+    uint32_t tableIndex;  // 4B for table index
+    uint32_t typeIndex;   // 4B for type index
+    uint32_t functionRef; // 4B for function ref (set by interpreter)
+    CallFrame* callFrame; // pointer to call frame (set by interpreter)
+};
+
+// Helpers
+
+struct MDCallHeader {
+    struct MDCall call;
+    struct MDCallCommonCall common;
+};
+
+struct MDCallIndirectHeader {
+    struct MDCallIndirect indirect;
+    struct MDCallCommonCall common;
+};
+
+#pragma pack()
+
+} // namespace JSC::IPInt
+
+} // namespace JSC
 
 #endif // ENABLE(WEBASSEMBLY[:w

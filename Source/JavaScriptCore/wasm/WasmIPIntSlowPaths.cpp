@@ -41,6 +41,7 @@
 #include "WasmCallingConvention.h"
 #include "WasmFunctionCodeBlockGenerator.h"
 #include "WasmInstance.h"
+#include "WasmIPIntGenerator.h"
 #include "WasmLLIntBuiltin.h"
 #include "WasmLLIntGenerator.h"
 #include "WasmModuleInformation.h"
@@ -568,13 +569,14 @@ WASM_IPINT_EXTERN_CPP_DECL(table_size, int32_t tableIndex)
 #endif
 }
 
-static inline UGPRPair doWasmCall(Wasm::Instance* instance, unsigned functionIndex, Register* sp, unsigned stackArgs)
+static inline UGPRPair doWasmCall(Wasm::Instance* instance, struct MDCallHeader* call, Register* sp)
 {
     uint32_t importFunctionCount = instance->module().moduleInformation().importFunctionCount();
 
     CodePtr<WasmEntryPtrTag> codePtr;
     EncodedJSValue boxedCallee = CalleeBits::encodeNullCallee();
 
+    auto functionIndex = call->call.functionIndex;
     if (functionIndex < importFunctionCount) {
         Wasm::Instance::ImportFunctionInfo* functionInfo = instance->importFunctionInfo(functionIndex);
         codePtr = functionInfo->importFunctionStub;
@@ -585,6 +587,7 @@ static inline UGPRPair doWasmCall(Wasm::Instance* instance, unsigned functionInd
             instance->calleeGroup()->wasmCalleeFromFunctionIndexSpace(functionIndex));
     }
 
+    auto stackArgs = call->common.stackSlots;
     Register* partiallyConstructedCalleeFrame = &sp[-safeCast<int>(CallFrameSlot::firstArgument + stackArgs)];
     Register& calleeStackSlot = partiallyConstructedCalleeFrame[static_cast<int>(CallFrameSlot::callee)];
     calleeStackSlot = boxedCallee;
@@ -592,15 +595,17 @@ static inline UGPRPair doWasmCall(Wasm::Instance* instance, unsigned functionInd
     WASM_CALL_RETURN(instance, codePtr.taggedPtr(), WasmEntryPtrTag);
 }
 
-WASM_IPINT_EXTERN_CPP_DECL(call, unsigned functionIndex, Register* sp, unsigned stackArgs)
+WASM_IPINT_EXTERN_CPP_DECL(call, struct MDCallHeader* call, Register* sp)
 {
-    return doWasmCall(instance, functionIndex, sp, stackArgs);
+    return doWasmCall(instance, call, sp);
 }
 
-WASM_IPINT_EXTERN_CPP_DECL(call_indirect, CallFrame* callFrame, unsigned functionIndex, unsigned* metadataEntry)
+WASM_IPINT_EXTERN_CPP_DECL(call_indirect, struct MDCallIndirectHeader* call, Register* sp)
 {
-    unsigned tableIndex = metadataEntry[0];
-    unsigned typeIndex = metadataEntry[1];
+    CallFrame* callFrame = call->indirect.callFrame;
+    unsigned functionIndex = call->indirect.functionRef;
+    unsigned tableIndex = call->indirect.tableIndex;
+    unsigned typeIndex = call->indirect.typeIndex;
     Wasm::FuncRefTable* table = instance->table(tableIndex)->asFuncrefTable();
 
     if (functionIndex >= table->length())
@@ -614,6 +619,14 @@ WASM_IPINT_EXTERN_CPP_DECL(call_indirect, CallFrame* callFrame, unsigned functio
     const auto& callSignature = static_cast<Wasm::IPIntCallee*>(callFrame->callee().asNativeCallee())->signature(typeIndex);
     if (callSignature.index() != function.m_function.typeIndex)
         WASM_THROW(Wasm::ExceptionType::BadSignature);
+
+    auto stackArgs = call->common.stackSlots;
+    Register* partiallyConstructedCalleeFrame = &sp[-safeCast<int>(CallFrameSlot::firstArgument + stackArgs)];
+    Register& calleeStackSlot = partiallyConstructedCalleeFrame[static_cast<int>(CallFrameSlot::callee)];
+    if (function.m_function.boxedWasmCalleeLoadLocation)
+        calleeStackSlot = CalleeBits::encodeBoxedNativeCallee(reinterpret_cast<void*>(*function.m_function.boxedWasmCalleeLoadLocation));
+    else
+        calleeStackSlot = CalleeBits::encodeNullCallee();
 
     WASM_CALL_RETURN(function.m_instance, function.m_function.entrypointLoadLocation->taggedPtr(), WasmEntryPtrTag);
 }

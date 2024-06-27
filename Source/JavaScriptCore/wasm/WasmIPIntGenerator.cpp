@@ -2191,11 +2191,15 @@ void IPIntGenerator::addCallCommonData(const FunctionSignature& signature)
     if (stackArgs & 1)
         minINTBytecode.append(static_cast<uint8_t>(IPInt::MINTCall::gap));
 
-    auto stackSlots = (stackArgs + 1) & (-2);
+    uint16_t stackSlots = (stackArgs + 1) & (-2);
+
+    struct IPInt::MDCallCommonCall commonCall = {
+        .stackSlots = stackSlots
+    };
     auto size = m_metadata->m_metadata.size();
-    m_metadata->addBlankSpace(2);
+    m_metadata->addBlankSpace(sizeof(commonCall));
     auto data = m_metadata->m_metadata.data() + size;
-    WRITE_TO_METADATA(data, stackSlots, uint16_t);
+    WRITE_TO_METADATA(data, commonCall, IPInt::MDCallCommonCall);
 
     size = m_metadata->m_metadata.size();
     m_metadata->addBlankSpace(minINTBytecode.size());
@@ -2206,11 +2210,14 @@ void IPIntGenerator::addCallCommonData(const FunctionSignature& signature)
         minINTBytecode.removeLast();
     }
 
+    struct IPInt::MDCallCommonReturn commonReturn = {
+        .stackSlots = stackSlots,
+        .argumentCount = safeCast<uint16_t>(signature.argumentCount())
+    };
     size = m_metadata->m_metadata.size();
-    m_metadata->addBlankSpace(4);
+    m_metadata->addBlankSpace(sizeof(commonReturn));
     data = m_metadata->m_metadata.data() + size;
-    WRITE_TO_METADATA(data, stackSlots, uint16_t);
-    WRITE_TO_METADATA(data + 2, signature.argumentCount(), uint16_t);
+    WRITE_TO_METADATA(data, commonReturn, IPInt::MDCallCommonReturn);
 
     minINTBytecode.clear();
 
@@ -2329,14 +2336,13 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addCall(uint32_t index, const T
         results.append(Value { });
     changeStackSize(signature.returnCount() - signature.argumentCount());
 
-    // Function index:
-    // 1B for instruction length
-    // 4B for decoded index
+    struct IPInt::MDCall functionIndexMetadata = {
+        .length = safeCast<uint8_t>(getCurrentInstructionLength()),
+        .functionIndex = index
+    };
     auto size = m_metadata->m_metadata.size();
-    m_metadata->addBlankSpace(5);
-    auto functionIndexMetadata = m_metadata->m_metadata.data() + size;
-    WRITE_TO_METADATA(functionIndexMetadata, getCurrentInstructionLength(), uint8_t);
-    WRITE_TO_METADATA(functionIndexMetadata + 1, index, uint32_t);
+    m_metadata->addBlankSpace(sizeof(functionIndexMetadata));
+    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, functionIndexMetadata, IPInt::MDCall);
     addCallCommonData(signature);
     return { };
 }
@@ -2349,16 +2355,16 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addCallIndirect(unsigned tableI
     const unsigned callIndex = 1;
     changeStackSize(signature.returnCount() - signature.argumentCount() - callIndex);
 
-    // Function index:
-    // 1B for length
-    // 4B for table index
-    // 4B for type index
+    struct IPInt::MDCallIndirect functionIndexMetadata = {
+        .length = safeCast<uint8_t>(getCurrentInstructionLength()),
+        .tableIndex = tableIndex,
+        .typeIndex = m_metadata->addSignature(type),
+        .functionRef = 0xBEEF,
+        .callFrame = nullptr
+    };
     auto size = m_metadata->m_metadata.size();
-    m_metadata->addBlankSpace(9);
-    auto functionIndexMetadata = m_metadata->m_metadata.data() + size;
-    WRITE_TO_METADATA(functionIndexMetadata, getCurrentInstructionLength(), uint8_t);
-    WRITE_TO_METADATA(functionIndexMetadata + 1, tableIndex, uint32_t);
-    WRITE_TO_METADATA(functionIndexMetadata + 5, m_metadata->addSignature(type), uint32_t);
+    m_metadata->addBlankSpace(sizeof(functionIndexMetadata));
+    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, functionIndexMetadata, struct IPInt::MDCallIndirect);
 
     addCallCommonData(signature);
     return { };

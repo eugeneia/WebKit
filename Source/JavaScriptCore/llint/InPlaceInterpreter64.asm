@@ -486,18 +486,22 @@ instructionLabel(_call_indirect)
     # Get ref
     # Load pre-computed values from metadata
     popInt32(t0, t1)
-    push PC, MC # a4
-    move t0, a2
-    leap 1[PM, MC], a3
+    storei t0, IPInt::MDCallIndirect::functionRef[PM, MC]
+    # Stash cfr
+    storep cfr, IPInt::MDCallIndirect::callFrame[PM, MC]
+
+    # sp (-16 because we will push PL, wasmInstance)
+    subp sp, 16, a2
+    # Get MDCallHeader
+    leap [PM, MC], a1
+    # instance
     move wasmInstance, a0
-    move cfr, a1
-    operationCall(macro() cCall4(_ipint_extern_call_indirect) end)
-    pop MC, PC
+    operationCall(macro() cCall2(_ipint_extern_call_indirect) end)
     btpz r1, .ipint_call_indirect_throw
 
-    loadb [PM, MC], t2
+    loadb IPInt::MDCallIndirect::length[PM, MC], t2
     advancePCByReg(t2)
-    advanceMC(9)
+    advanceMC(constexpr (sizeof(IPInt::MDCallIndirectHeader)))
 
     jmp .ipint_call_common
 .ipint_call_indirect_throw:
@@ -5057,25 +5061,14 @@ end
 end
 
 _ipint_call_impl:
-    # 0 - 3: function index
-    # 4 - 7: PC post call
-    # 8 - 9: length of mint bytecode
-    # 10 - : mint bytecode
+    loadb IPInt::MDCall::length[PM, MC], t0
+    advancePCByReg(t0)
 
-    # function index
-    loadi 1[PM, MC], t0
-
-    loadb [PM, MC], t1
-    advancePCByReg(t1)
-    advanceMC(5)
-
-    # number of stack slots
-    loadh [PM, MC], wa3
-    advanceMC(2)
     # sp (-16 because we will push PL, wasmInstance)
     subp sp, 16, a2
-    # Get function data
-    move t0, a1
+    # Get MDCallHeader
+    leap [PM, MC], a1
+    advanceMC(constexpr (sizeof(IPInt::MDCallHeader)))
     # instance
     move wasmInstance, a0
     operationCall(macro() cCall2(_ipint_extern_call) end)
