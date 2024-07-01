@@ -2246,16 +2246,6 @@ void IPIntGenerator::addCallCommonData(const FunctionSignature& signature)
 #else
 void IPIntGenerator::addCallCommonData(const FunctionSignature& signature)
 {
-    // Metadata structure for calls:
-    // mINT: mini-interpreter / minimalist interpreter (whichever floats your boat)
-    //
-    // 0x00 - 0x07: push into a0, a1, ...
-    // 0x08 - 0x0b: push into fa0, fa1, ...
-    // 0x0c: pop stack value, push onto stack[0]
-    // 0x0d: pop stack value, add another 16B for params, push onto stack[8]
-    // 0x0e: add another 16B for params
-    // 0x0f: stop
-
     const uint8_t gprs = 4;
     const uint8_t fprs = 2;
 
@@ -2264,43 +2254,50 @@ void IPIntGenerator::addCallCommonData(const FunctionSignature& signature)
     uint16_t stackArgs = 0;
 
     Vector<uint8_t, 16> minINTBytecode;
-    minINTBytecode.append(0x0f);
+    minINTBytecode.append(static_cast<uint8_t>(IPInt::MINTCall::call));
     for (size_t i = 0; i < signature.argumentCount(); ++i) {
         auto type = signature.argumentType(i);
         if ((type.isI32() || type.isI64()) && gprsUsed != gprs) {
-            minINTBytecode.append(gprsUsed);
+            minINTBytecode.append(static_cast<uint8_t>(IPInt::MINTCall::a) + gprsUsed);
             gprsUsed += 2;
         } else if ((type.isF32() || type.isF64()) && fprsUsed != fprs)
-            minINTBytecode.append(8 + fprsUsed++);
+            minINTBytecode.append(static_cast<uint8_t>(IPInt::MINTCall::fa) + fprsUsed++);
         else {
-            minINTBytecode.append(0x0c + (stackArgs & 1));
+            minINTBytecode.append(static_cast<uint8_t>(IPInt::MINTCall::stackzero) + (stackArgs & 1));
             ++stackArgs;
         }
     }
 
     if (stackArgs & 1)
-        minINTBytecode.append(0x0e);
+        minINTBytecode.append(static_cast<uint8_t>(IPInt::MINTCall::gap));
+
+    uint16_t stackSlots = (stackArgs + 1) & (-2);
+
+    struct IPInt::MDCallCommonCall commonCall = {
+        .stackSlots = stackSlots
+    };
     auto size = m_metadata->m_metadata.size();
-    m_metadata->addBlankSpace(minINTBytecode.size());
+    m_metadata->addBlankSpace(sizeof(commonCall));
     auto data = m_metadata->m_metadata.data() + size;
+    WRITE_TO_METADATA(data, commonCall, IPInt::MDCallCommonCall);
+
+    size = m_metadata->m_metadata.size();
+    m_metadata->addBlankSpace(minINTBytecode.size());
+    data = m_metadata->m_metadata.data() + size;
     while (!minINTBytecode.isEmpty()) {
         WRITE_TO_METADATA(data, minINTBytecode.last(), uint8_t);
         data += 1;
         minINTBytecode.removeLast();
     }
 
-    // Returns:
-    // 2B for number of arguments on stack (to clean up current call frame)
-    // 2B for number of arguments (to take off arguments)
-    // 0x00 - 0x07: r0 - r7
-    // 0x08 - 0x0b: fr0 - fr3
-    // 0x0c: stack
-    // 0x0d: end
+    struct IPInt::MDCallCommonReturn commonReturn = {
+        .stackSlots = stackSlots,
+        .argumentCount = safeCast<uint16_t>(signature.argumentCount())
+    };
     size = m_metadata->m_metadata.size();
-    m_metadata->addBlankSpace(4);
+    m_metadata->addBlankSpace(sizeof(commonReturn));
     data = m_metadata->m_metadata.data() + size;
-    WRITE_TO_METADATA(data, (stackArgs + 1) & (-2), uint16_t);
-    WRITE_TO_METADATA(data + 2, signature.argumentCount(), uint16_t);
+    WRITE_TO_METADATA(data, commonReturn, IPInt::MDCallCommonReturn);
 
     minINTBytecode.clear();
 
@@ -2310,14 +2307,14 @@ void IPIntGenerator::addCallCommonData(const FunctionSignature& signature)
     for (size_t i = 0; i < signature.returnCount(); ++i) {
         auto type = signature.returnType(i);
         if ((type.isI32() || type.isI64()) && gprsUsed != gprs) {
-            minINTBytecode.append(gprsUsed);
+            minINTBytecode.append(static_cast<uint8_t>(IPInt::MINTReturn::r) + gprsUsed);
             gprsUsed += 2;
         } else if ((type.isF32() || type.isF64()) && fprsUsed != fprs)
-            minINTBytecode.append(8 + fprsUsed++);
+            minINTBytecode.append(static_cast<uint8_t>(IPInt::MINTReturn::fr) + (fprsUsed++));
         else
-            minINTBytecode.append(0x0c);
+            minINTBytecode.append(static_cast<uint8_t>(IPInt::MINTReturn::stack));
     }
-    minINTBytecode.append(0x0d);
+    minINTBytecode.append(static_cast<uint8_t>(IPInt::MINTReturn::end));
 
     size = m_metadata->m_metadata.size();
     m_metadata->addBlankSpace(minINTBytecode.size());

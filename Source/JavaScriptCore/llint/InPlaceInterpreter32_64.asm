@@ -2840,20 +2840,15 @@ macro mintRetDispatch()
 end
 
 _ipint_call_impl:
-    # 0 - 3: function index
-    # 4 - 7: PC post call
-    # 8 - 9: length of mint bytecode
-    # 10 - : mint bytecode
+    loadb IPInt::MDCall::length[PM, MC], t0
+    advancePCByReg(t0)
 
-    # function index
-    loadi 1[PM, MC], t0
-
-    loadb [PM, MC], t1
-    advancePCByReg(t1)
-    advanceMC(5)
-
-    # Get function data
-    move t0, a1
+    # sp (-8 because we will push PL, PM)
+    move sp, a2
+    subp 8, a2
+    # Get MDCallHeader
+    leap [PM, MC], a1
+    advanceMC(constexpr (sizeof(IPInt::MDCallHeader)))
     operationCall(macro() cCall2(_ipint_extern_call) end)
     # r0 = entrypoint
     # r1 = wasmInstance
@@ -2868,7 +2863,8 @@ _ipint_call_impl:
 
     move sp, ipintCallShadowSP
 
-    push PL, r0, r1
+    push PL
+    push r0, r1 # xxx - this is fine?
 
     # We'll update PM to be the value that the return metadata starts at
     addp MC, PM
@@ -2934,17 +2930,17 @@ mintAlign(_call)
     push PM
 
     # Set up the rest of the stack frame
-    subp FirstArgumentOffset - 16, sp
+    subp FirstArgumentOffset - 8, sp
 
-    storep PC, ThisArgumentOffset - 16[sp]
+    storep PC, ThisArgumentOffset - 8[sp]
 
     # Make the call
     move ipintCallSavedInstance, wasmInstance
     call ipintCallSavedEntrypoint, JSEntrySlowPathPtrTag
 
-    loadp ThisArgumentOffset - 16[sp], PC
+    loadp ThisArgumentOffset - 8[sp], PC
     # Restore the stack pointer
-    addp FirstArgumentOffset - 16, sp
+    addp FirstArgumentOffset - 8, sp
 
     pop PM
 
