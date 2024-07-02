@@ -2843,9 +2843,17 @@ _ipint_call_impl:
     loadb IPInt::MDCall::length[PM, MC], t0
     advancePCByReg(t0)
 
-    # sp (-8 because we will push PL, PM)
+    # stack space to stash things
+    # (ipintCallSavedEntrypoint, ipintCallSavedInstance, PL, PM)
+    const ipintCallStashSize = 16
+    const ipintCallStashedEntrypoint = 12
+    const ipintCallStashedInstance = 8
+    const ipintCallStashedPL = 4
+    const ipintCallStashedPM = 0
+
+    # sp
     move sp, a2
-    subp 8, a2
+    subp ipintCallStashSize, a2
     # Get MDCallHeader
     leap [PM, MC], a1
     advanceMC(constexpr (sizeof(IPInt::MDCallHeader)))
@@ -2863,8 +2871,13 @@ _ipint_call_impl:
 
     move sp, ipintCallShadowSP
 
-    push PL
-    push r0, r1 # xxx - this is fine?
+    # carve out temporary stash
+    subp ipintCallStashSize, sp
+
+    storep r0, ipintCallStashedEntrypoint[sp]
+    storep r1, ipintCallStashedInstance[sp]
+
+    storep PL, ipintCallStashedPL[sp]
 
     # We'll update PM to be the value that the return metadata starts at
     addp MC, PM
@@ -2922,12 +2935,12 @@ mintAlign(_gap)
 
 mintAlign(_call)
     const ipintCallSavedInstance = t5
-    pop ipintCallSavedInstance
+    loadp ipintCallStashedInstance[sp], ipintCallSavedInstance
     const ipintCallSavedEntrypoint = PB
-    pop ipintCallSavedEntrypoint
+    loadp ipintCallStashedEntrypoint[sp], ipintCallSavedEntrypoint
 
     # Save PM (conflicts with wasmInstance)
-    push PM
+    storep PM, ipintCallStashedPM[sp]
 
     # Set up the rest of the stack frame
     subp FirstArgumentOffset - 8, sp
@@ -2942,7 +2955,7 @@ mintAlign(_call)
     # Restore the stack pointer
     addp FirstArgumentOffset - 8, sp
 
-    pop PM
+    loadp ipintCallStashedPM[sp], PM
 
     # Hey, look. PM hasn't been used to store anything.
     # No need to compute anything, just directly load stuff we need.
@@ -2952,7 +2965,10 @@ mintAlign(_call)
     const ipintCallSavedPL = PB
 
     # Grab PL
-    pop ipintCallSavedPL
+    loadp ipintCallStashedPL[sp], ipintCallSavedPL
+
+    # release stash
+    addp ipintCallStashSize, sp
 
     # Adjust sp to pop off arguments consumed
     # (mint popped off ipintCallShadowSP)
