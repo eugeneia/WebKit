@@ -5064,6 +5064,9 @@ _ipint_call_impl:
     loadb IPInt::MDCall::length[PM, MC], t0
     advancePCByReg(t0)
 
+    # XXX hack: stack offset to make sure _ipint_extern_call doesn't clobber its own frame
+    const ipintCallStackSafeSpace = 512
+
     # sp (-16 because we will push PL, wasmInstance)
     subp sp, 16, a2
     # Get MDCallHeader
@@ -5071,7 +5074,9 @@ _ipint_call_impl:
     advanceMC(constexpr (sizeof(IPInt::MDCallHeader)))
     # instance
     move wasmInstance, a0
+    subp ipintCallStackSafeSpace, sp
     operationCall(macro() cCall2(_ipint_extern_call) end)
+    addp ipintCallStackSafeSpace, sp
 
 .ipint_call_common:
     # wasmInstance = csr0
@@ -5192,10 +5197,10 @@ mintAlign(_gap)
 
 mintAlign(_call)
     # Set up the rest of the stack frame
-    subp FirstArgumentOffset - 16, sp
+    subp FirstArgumentOffset - CallerFrameAndPCSize, sp
 
     # wasmInstance = PC
-    storeq wasmInstance, ThisArgumentOffset - 16[sp]
+    storeq wasmInstance, ThisArgumentOffset - CallerFrameAndPCSize[sp]
 
     # Swap instances
     move ipintCallNewInstance, wasmInstance
@@ -5208,13 +5213,13 @@ mintAlign(_call)
     # Make the call
     call ipintCallSavedEntrypoint, JSEntrySlowPathPtrTag
 
-    loadq ThisArgumentOffset - 16[sp], PB
+    loadq ThisArgumentOffset - CallerFrameAndPCSize[sp], PB
     # Restore the stack pointer
-    addp FirstArgumentOffset - 16, sp
+    addp FirstArgumentOffset - CallerFrameAndPCSize, sp
 
     # Hey, look. PM hasn't been used to store anything.
     # No need to compute anything, just directly load stuff we need.
-    loadh [PM], ws0  # number of stack args
+    loadh IPInt::MDCallCommonReturn::stackSlots[PM], ws0  # number of stack args
     leap [sp, ws0, 8], sp
 
     const ipintCallSavedPL = memoryBase
@@ -5222,10 +5227,10 @@ mintAlign(_call)
     # Grab PL
     pop wasmInstance, ipintCallSavedPL
 
-    loadh 2[PM], ws0
+    loadh IPInt::MDCallCommonReturn::argumentCount[PM], ws0
     lshiftq 4, ws0
     addq ws0, sp
-    addq 4, PM
+    addq constexpr (sizeof(IPInt::MDCallCommonReturn)), PM
     mintRetDispatch()
 
 mintAlign(_r0)
