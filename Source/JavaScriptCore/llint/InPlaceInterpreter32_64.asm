@@ -143,7 +143,7 @@ macro peekDouble(i, reg)
 end
 
 macro drop()
-    addp 16, sp
+    addp StackValueSize, sp
 end
 
 # Typed push/pop/peek to make code pretty
@@ -239,7 +239,13 @@ instructionLabel(_block)
     loadi 4[PM, MC], MC
     nextIPIntInstruction()
 
-unimplementedInstruction(_loop)
+instructionLabel(_loop)
+    # loop
+    ipintLoopOSR(1)
+    loadb [PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(1)
+    nextIPIntInstruction()
 
 instructionLabel(_if)
     # if
@@ -255,7 +261,15 @@ instructionLabel(_if)
     advancePCByReg(t0)
     nextIPIntInstruction()
 
-unimplementedInstruction(_else)
+instructionLabel(_else)
+    # else
+    # Counterintuitively, we only run this instruction if the if
+    # clause is TAKEN. This is used to branch to the end of the
+    # block.
+    loadi [PM, MC], PC
+    loadi 4[PM, MC], MC
+    nextIPIntInstruction()
+
 unimplementedInstruction(_try)
 unimplementedInstruction(_catch)
 unimplementedInstruction(_throw)
@@ -422,8 +436,27 @@ reservedOpcode(0x16)
 reservedOpcode(0x17)
 unimplementedInstruction(_delegate)
 unimplementedInstruction(_catch_all)
-unimplementedInstruction(_drop)
-unimplementedInstruction(_select)
+
+instructionLabel(_drop)
+    drop()
+    advancePC(1)
+    nextIPIntInstruction()
+
+instructionLabel(_select)
+    popInt32(t0)
+    bieq t0, 0, .ipint_select_val2
+    drop()
+    advancePC(1)
+    advanceMC(8)
+    nextIPIntInstruction()
+.ipint_select_val2:
+    popQuad(t1, t0)
+    drop()
+    pushQuad(t1, t0)
+    advancePC(1)
+    advanceMC(8)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_select_t)
 reservedOpcode(0x1d)
 reservedOpcode(0x1e)
@@ -457,9 +490,77 @@ instructionLabel(_local_set)
     store2ia t2, t3, [PL, t0, LocalSize]
     nextIPIntInstruction()
 
-unimplementedInstruction(_local_tee)
-unimplementedInstruction(_global_get)
-unimplementedInstruction(_global_set)
+instructionLabel(_local_tee)
+    # local.tee
+    loadb 1[PB, PC], t0
+    advancePC(2)
+    bbaeq t0, 128, _ipint_local_tee_slow_path
+.ipint_local_tee_post_decode:
+    # Load from stack
+    load2ia [sp], t3, t2
+    # Store to locals
+    store2ia t2, t3, [PL, t0, LocalSize]
+    nextIPIntInstruction()
+
+instructionLabel(_global_get)
+    # Load pre-computed index from metadata
+    loadh 6[PM, MC], t2
+    loadi [PM, MC], t1
+    loadp CodeBlock[cfr], t0
+    loadp Wasm::Instance::m_globals[t0], t0
+    lshiftp 1, t1
+    load2ia [t0, t1, 8], t0, t1
+    bieq t2, 0, .ipint_global_get_embedded
+    load2ia [t0], t0, t1
+.ipint_global_get_embedded:
+    pushQuad(t1, t0)
+
+    loadh 4[PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(8)
+    nextIPIntInstruction()
+
+instructionLabel(_global_set)
+    # b7 = 1 => ref, use slowpath
+    loadb 7[PM, MC], t0
+    bineq t0, 0, .ipint_global_set_refpath
+    # b6 = 1 => portable
+    loadb 6[PM, MC], t5
+    # get global addr
+    loadp CodeBlock[cfr], t0
+    loadp Wasm::Instance::m_globals[t0], t0
+    # get value to store
+    popQuad(t3, t2)
+    # get index
+    loadi [PM, MC], t1
+    lshiftp 1, t1
+    bieq t5, 0, .ipint_global_set_embedded
+    # portable: dereference then set
+    loadp [t0, t1, 8], t0
+    store2ia t2, t3, [t0]
+    loadh 4[PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(8)
+    nextIPIntInstruction()
+.ipint_global_set_embedded:
+    # embedded: set directly
+    store2ia t2, t3, [t0, t1, 8]
+    loadh 4[PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(8)
+    nextIPIntInstruction()
+
+.ipint_global_set_refpath:
+    loadi [PM, MC], a1
+    # Pop from stack
+    popQuad(a2, a3)
+    operationCall(macro() cCall3(_ipint_extern_set_global_ref) end)
+
+    loadh 4[PM, MC], t0
+    advancePCByReg(t0)
+    advanceMC(8)
+    nextIPIntInstruction()
+
 unimplementedInstruction(_table_get)
 unimplementedInstruction(_table_set)
 reservedOpcode(0x27)
