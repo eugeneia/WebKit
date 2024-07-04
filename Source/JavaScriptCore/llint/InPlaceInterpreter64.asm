@@ -474,6 +474,9 @@ instructionLabel(_return)
     # dispatch and end of program check for speed
     jmp .ipint_end_ret
 
+# XXX hack: stack offset to make sure _ipint_extern_call doesn't clobber its own frame
+const ipintCallStackSafeSpace = 512
+
 instructionLabel(_call)
     storei PC, CallSiteIndex[cfr]
 
@@ -494,9 +497,9 @@ instructionLabel(_call_indirect)
     subp sp, 16, a2
     # Get MDCallHeader
     leap [PM, MC], a1
-    # instance
-    move wasmInstance, a0
+    subp ipintCallStackSafeSpace, sp 
     operationCall(macro() cCall2(_ipint_extern_call_indirect) end)
+    addp ipintCallStackSafeSpace, sp
     btpz r1, .ipint_call_indirect_throw
 
     loadb IPInt::MDCallIndirect::length[PM, MC], t2
@@ -5064,16 +5067,11 @@ _ipint_call_impl:
     loadb IPInt::MDCall::length[PM, MC], t0
     advancePCByReg(t0)
 
-    # XXX hack: stack offset to make sure _ipint_extern_call doesn't clobber its own frame
-    const ipintCallStackSafeSpace = 512
-
     # sp (-16 because we will push PL, wasmInstance)
     subp sp, 16, a2
     # Get MDCallHeader
     leap [PM, MC], a1
     advanceMC(constexpr (sizeof(IPInt::MDCallHeader)))
-    # instance
-    move wasmInstance, a0
     subp ipintCallStackSafeSpace, sp
     operationCall(macro() cCall2(_ipint_extern_call) end)
     addp ipintCallStackSafeSpace, sp
