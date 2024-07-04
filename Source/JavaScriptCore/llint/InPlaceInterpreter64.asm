@@ -659,7 +659,7 @@ instructionLabel(_global_set)
     loadi [PM, MC], a1
     # Pop from stack
     popQuad(a2, t3)
-    operationCall(macro() cCall3(_ipint_extern_set_global_64) end)
+    operationCall(macro() cCall3(_ipint_extern_set_global_ref) end)
 
     loadh 4[PM, MC], t0
     advancePCByReg(t0)
