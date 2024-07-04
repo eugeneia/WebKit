@@ -362,13 +362,58 @@ instructionLabel(_return)
     # dispatch and end of program check for speed
     jmp .ipint_end_ret
 
+# stack alignment
+const ipintCallStackStackAlign = CallFrameAlignSlots * SlotSize
+
+# stack space to stash things
+# (ipintCallSavedEntrypoint, ipintCallSavedInstance, PL, PM)
+const ipintCallStashedPM = ipintCallStackStackAlign
+const ipintCallStashedPL = ipintCallStashedPM + MachineRegisterSize
+const ipintCallStashedInstance = ipintCallStashedPL + MachineRegisterSize
+const ipintCallStashedEntrypoint = ipintCallStashedInstance + MachineRegisterSize
+const ipintCallStashSize = 4 * MachineRegisterSize
+
+# XXX hack: stack offset to make sure _ipint_extern_call doesn't clobber its own frame
+const ipintCallStackSafeSpace = 512
+
 instructionLabel(_call)
     storei PC, CallSiteIndex[cfr]
 
     # call
     jmp _ipint_call_impl
 
-unimplementedInstruction(_call_indirect)
+instructionLabel(_call_indirect)
+    storei PC, CallSiteIndex[cfr]
+
+    # Get ref
+    # Load pre-computed values from metadata
+    popInt32(t0)
+    storei t0, IPInt::MDCallIndirect::functionRef[PM, MC]
+    # Stash cfr
+    storep cfr, IPInt::MDCallIndirect::callFrame[PM, MC]
+
+    # carve out stash space and prepare stack pointer alignment
+    subp ipintCallStackStackAlign + ipintCallStashSize, sp
+
+    # sp
+    move sp, a2
+    # Get MDCallHeader
+    leap [PM, MC], a1
+    subp ipintCallStackSafeSpace, sp
+    operationCall(macro() cCall2(_ipint_extern_call_indirect) end)
+    addp ipintCallStackSafeSpace, sp
+    btpz r1, .ipint_call_indirect_throw
+    # r0 = entrypoint
+    # r1 = wasmInstance
+
+    loadb IPInt::MDCallIndirect::length[PM, MC], t2
+    advancePCByReg(t2)
+    advanceMC(constexpr (sizeof(IPInt::MDCallIndirectHeader)))
+
+    jmp .ipint_call_common
+.ipint_call_indirect_throw:
+    jmp _wasm_throw_from_slow_path_trampoline
+
 reservedOpcode(0x12)
 reservedOpcode(0x13)
 reservedOpcode(0x14)
@@ -2843,20 +2888,6 @@ _ipint_call_impl:
     loadb IPInt::MDCall::length[PM, MC], t0
     advancePCByReg(t0)
 
-    # stack alignment
-    const ipintCallStackStackAlign = CallFrameAlignSlots * SlotSize
-
-    # stack space to stash things
-    # (ipintCallSavedEntrypoint, ipintCallSavedInstance, PL, PM)
-    const ipintCallStashedPM = ipintCallStackStackAlign
-    const ipintCallStashedPL = ipintCallStashedPM + MachineRegisterSize
-    const ipintCallStashedInstance = ipintCallStashedPL + MachineRegisterSize
-    const ipintCallStashedEntrypoint = ipintCallStashedInstance + MachineRegisterSize
-    const ipintCallStashSize = 4 * MachineRegisterSize
-
-    # XXX hack: stack offset to make sure _ipint_extern_call doesn't clobber its own frame
-    const ipintCallStackSafeSpace = 512
-
     # carve out stash space and prepare stack pointer alignment
     subp ipintCallStackStackAlign + ipintCallStashSize, sp
 
@@ -2871,6 +2902,7 @@ _ipint_call_impl:
     # r0 = entrypoint
     # r1 = wasmInstance
 
+.ipint_call_common:
     # CANNOT throw away: entrypoint, PM
     # CAN throw away immediately: PB
     # for call: MUST preserve MC
