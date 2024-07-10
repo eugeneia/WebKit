@@ -474,41 +474,94 @@ instructionLabel(_return)
     # dispatch and end of program check for speed
     jmp .ipint_end_ret
 
-# XXX hack: stack offset to make sure _ipint_extern_call doesn't clobber its own frame
-const ipintCallStackSafeSpace = 512
-
 instructionLabel(_call)
     storei PC, CallSiteIndex[cfr]
 
-    # call
-    jmp _ipint_call_impl
+    loadb IPInt::MDCall::length[PM, MC], t0
+    advancePCByReg(t0)
+
+    const ipintCallSavedMetadata = PM
+    const ipintCallSavedEntrypoint = PB
+    const ipintCallSavedInstance = t9
+
+    # Get MDCall
+    leap [PM, MC], ipintCallSavedMetadata
+
+    # Prepare MDCall caller stack pointer
+    storep sp, IPInt::MDCall::callerStack[ipintCallSavedMetadata]
+
+    # Allocate stack space (no stack check)
+    loadp t0, IPInt::MDCall::frameSize[ipintCallSavedMetadata]
+    subp t0, sp
+    subp (12*8), sp # XXX arguments
+
+    # Set MDCall callee frame
+    storep sp, IPInt::MDCall::calleeFrame[ipintCallSavedMetadata]
+
+    # Save PL, MC
+    storep PL, IPInt::MDCall::savedPL[ipintCallSavedMetadata]
+    storep MC, IPInt::MDCall::savedMC[ipintCallSavedMetadata]
+
+    # Prepare callee frame
+    move ipintCallSavedMetadata, a1
+    operationCall(macro() cCall2(_ipint_extern_call) end)
+
+    # Save entrypoint
+    move r0, ipintCallSavedEntrypoint
+
+    # Swap instance
+    move wasmInstance, ipintCallSavedInstance
+    move r1, wasmInstance
+
+    # Set up memory
+    ipintReloadMemory()
+
+    # Arguments
+    pop a0, a1, a2, a3, a4, a5, a6, a7
+    pop fa0, fa1, fa2, fa3
+
+    # Make the call
+    call ipintCallSavedEntrypoint, JSEntrySlowPathPtrTag
+
+    # Return values
+    push r0, r1, t2, t3, t4, t5, t6, t7
+    push ft0, ft1, ft2, ft3
+    
+    # Swap back instance
+    move ipintCallSavedInstance, wasmInstance
+
+    # Tear down callee frame and push return values onto stack
+    move ipintCallSavedMetadata, a1
+    operationCall(macro() cCall2(_ipint_extern_return) end)
+    addp r0, sp
+    addp (12*8), sp
+
+    # Restore stack pointer
+    loadp t0, IPInt::MDCall::frameSize[ipintCallSavedMetadata]
+    addp t0, sp
+
+    # Restore PL, MC
+    loadp IPInt::MDCall::savedPL[ipintCallSavedMetadata], PL
+    loadp IPInt::MDCall::savedMC[ipintCallSavedMetadata], MC
+
+    # Restore PM
+    subp ipintCallSavedMetadata, MC, PM
+
+    # Consume MDCall
+    advanceMC(constexpr (sizeof(IPInt::MDCall)))
+
+    # Restore IB
+    if ARM64 or ARM64E
+        pcrtoaddr _ipint_unreachable, IB
+    end
+
+    # Restore memory
+    ipintReloadMemory()
+
+    nextIPIntInstruction()
 
 instructionLabel(_call_indirect)
-    storei PC, CallSiteIndex[cfr]
-
-    # Get ref
-    # Load pre-computed values from metadata
-    popInt32(t0, t1)
-    storei t0, IPInt::MDCallIndirect::functionRef[PM, MC]
-    # Stash cfr
-    storep cfr, IPInt::MDCallIndirect::callFrame[PM, MC]
-
-    # sp (-16 because we will push PL, wasmInstance)
-    subp sp, 16, a2
-    # Get MDCallHeader
-    leap [PM, MC], a1
-    subp ipintCallStackSafeSpace, sp 
-    operationCall(macro() cCall2(_ipint_extern_call_indirect) end)
-    addp ipintCallStackSafeSpace, sp
-    btpz r1, .ipint_call_indirect_throw
-
-    loadb IPInt::MDCallIndirect::length[PM, MC], t2
-    advancePCByReg(t2)
-    advanceMC(constexpr (sizeof(IPInt::MDCallIndirectHeader)))
-
-    jmp .ipint_call_common
-.ipint_call_indirect_throw:
-    jmp _wasm_throw_from_slow_path_trampoline
+    break
 
 reservedOpcode(0x12)
 reservedOpcode(0x13)
@@ -5012,332 +5065,8 @@ slowPathLabel(_local_tee)
     decodeULEB128(.ipint_local_tee_post_decode, t0)
 
 ##################################
-## "Out of line" logic for call ##
+##    argumINT and uInt         ##
 ##################################
-
-macro mintPop(reg)
-    loadq [ws1], reg
-    addq 16, ws1
-end
-
-macro mintPopF(reg)
-    loadd [ws1], reg
-    addq 16, ws1
-end
-
-macro mintArgDispatch()
-    loadb [PM], ws0
-    addq 1, PM
-    andq 15, ws0
-    lshiftq 6, ws0
-if ARM64 or ARM64E
-    pcrtoaddr _mint_begin, csr4
-    addq ws0, csr4
-    # csr4 = x23
-    emit "br x23"
-elsif X86_64
-    leap (_mint_begin), csr4
-    addq ws0, csr4
-    # csr4 = r13
-    emit "jmp *(%r13)"
-end
-end
-
-macro mintRetDispatch()
-    loadb [PM], ws0
-    addq 1, PM
-    bilt ws0, 14, .safe
-    break
-.safe:
-    lshiftq 6, ws0
-if ARM64 or ARM64E
-    pcrtoaddr _mint_begin_return, csr4
-    addq ws0, csr4
-    # csr4 = x23
-    emit "br x23"
-elsif X86_64
-    leap (_mint_begin_return), csr4
-    addq ws0, csr4
-    # csr4 = r13
-    emit "jmp *(%r13)"
-end
-end
-
-_ipint_call_impl:
-    loadb IPInt::MDCall::length[PM, MC], t0
-    advancePCByReg(t0)
-
-    # sp (-16 because we will push PL, wasmInstance)
-    subp sp, 16, a2
-    # Get MDCallHeader
-    leap [PM, MC], a1
-    advanceMC(constexpr (sizeof(IPInt::MDCallHeader)))
-    subp ipintCallStackSafeSpace, sp
-    operationCall(macro() cCall2(_ipint_extern_call) end)
-    addp ipintCallStackSafeSpace, sp
-
-.ipint_call_common:
-    # wasmInstance = csr0
-    # PM = csr1
-    # PB = csr2
-    # memoryBase = csr3
-    # boundsCheckingSize = csr4
-
-    # CANNOT throw away: entrypoint, new instance, PM
-    # CAN throw away immediately: memoryBase, boundsCheckingSize, PB
-    # for call: MUST preserve MC
-    # for call: PB/PM (load from callee)
-
-    # csr0 = wasmInstance, then PC
-    # csr1 = PM (later PM + PB)
-    # csr2 = new entrypoint
-    # csr3 = new instance, then old instance
-    # csr4 = temp
-    # ws0 = temp
-
-    const ipintCallSavedEntrypoint = PB
-    const ipintCallNewInstance = memoryBase
-
-    # shadow stack pointer
-    const ipintCallShadowSP = ws1
-
-    push PL, wasmInstance
-    move sp, ipintCallShadowSP
-    addq 16, ipintCallShadowSP
-    move PC, wasmInstance
-
-    # Free up r0, r1 to be used as argument registers
-    move r0, ipintCallSavedEntrypoint
-    move r1, ipintCallNewInstance
-
-    # We'll update PM to be the value that the return metadata starts at
-    addq MC, PM
-    mintArgDispatch()
-
-mintAlign(_a0)
-_mint_begin:
-    mintPop(a0)
-    mintArgDispatch()
-
-mintAlign(_a1)
-    mintPop(a1)
-    mintArgDispatch()
-
-mintAlign(_a2)
-    mintPop(a2)
-    mintArgDispatch()
-
-mintAlign(_a3)
-    mintPop(a3)
-    mintArgDispatch()
-
-mintAlign(_a4)
-if ARM64 or ARM64E
-    mintPop(a4)
-    mintArgDispatch()
-else
-    break
-end
-
-mintAlign(_a5)
-if ARM64 or ARM64E
-    mintPop(a5)
-    mintArgDispatch()
-else
-    break
-end
-
-mintAlign(_a6)
-if ARM64 or ARM64E
-    mintPop(a6)
-    mintArgDispatch()
-else
-    break
-end
-
-mintAlign(_a7)
-if ARM64 or ARM64E
-    mintPop(a7)
-    mintArgDispatch()
-else
-    break
-end
-
-mintAlign(_fa0)
-    mintPopF(fa0)
-    mintArgDispatch()
-
-mintAlign(_fa1)
-    mintPopF(fa1)
-    mintArgDispatch()
-
-mintAlign(_fa2)
-    mintPopF(fa2)
-    mintArgDispatch()
-
-mintAlign(_fa3)
-    mintPopF(fa3)
-    mintArgDispatch()
-
-mintAlign(_stackzero)
-    mintPop(ws0)
-    storeq ws0, [sp]
-    mintArgDispatch()
-
-mintAlign(_stackeight)
-    mintPop(ws0)
-    pushQuad(ws0)
-    mintArgDispatch()
-
-mintAlign(_gap)
-    subq 16, sp
-    mintArgDispatch()
-
-mintAlign(_call)
-    # Set up the rest of the stack frame
-    subp FirstArgumentOffset - CallerFrameAndPCSize, sp
-
-    # wasmInstance = PC
-    storeq wasmInstance, ThisArgumentOffset - CallerFrameAndPCSize[sp]
-
-    # Swap instances
-    move ipintCallNewInstance, wasmInstance
-
-    # Set up memory
-    push t2, t3
-    ipintReloadMemory()
-    pop t3, t2
-
-    # Make the call
-    call ipintCallSavedEntrypoint, JSEntrySlowPathPtrTag
-
-    loadq ThisArgumentOffset - CallerFrameAndPCSize[sp], PB
-    # Restore the stack pointer
-    addp FirstArgumentOffset - CallerFrameAndPCSize, sp
-
-    # Hey, look. PM hasn't been used to store anything.
-    # No need to compute anything, just directly load stuff we need.
-    loadh IPInt::MDCallCommonReturn::stackSlots[PM], ws0  # number of stack args
-    leap [sp, ws0, 8], sp
-
-    const ipintCallSavedPL = memoryBase
-
-    # Grab PL
-    pop wasmInstance, ipintCallSavedPL
-
-    loadh IPInt::MDCallCommonReturn::argumentCount[PM], ws0
-    lshiftq 4, ws0
-    addq ws0, sp
-    addq constexpr (sizeof(IPInt::MDCallCommonReturn)), PM
-    mintRetDispatch()
-
-mintAlign(_r0)
-_mint_begin_return:
-    pushQuad(r0)
-    mintRetDispatch()
-
-mintAlign(_r1)
-    pushQuad(r1)
-    mintRetDispatch()
-
-mintAlign(_r2)
-    pushQuad(t2)
-    mintRetDispatch()
-
-mintAlign(_r3)
-    pushQuad(t3)
-    mintRetDispatch()
-
-mintAlign(_r4)
-if ARM64 or ARM64E
-    pushQuad(t4)
-    mintRetDispatch()
-else
-    break
-end
-
-mintAlign(_r5)
-if ARM64 or ARM64E
-    pushQuad(t5)
-    mintRetDispatch()
-else
-    break
-end
-
-mintAlign(_r6)
-if ARM64 or ARM64E
-    pushQuad(t6)
-    mintRetDispatch()
-else
-    break
-end
-
-mintAlign(_r7)
-if ARM64 or ARM64E
-    pushQuad(t7)
-    mintRetDispatch()
-else
-    break
-end
-
-mintAlign(_fr0)
-    if ARM64 or ARM64E
-        emit "str q0, [sp, #-16]!"
-    else
-        emit "sub $16, %esp"
-        emit "movdqu %xmm0, (%esp)"
-    end
-    mintRetDispatch()
-
-mintAlign(_fr1)
-    if ARM64 or ARM64E
-        emit "str q1, [sp, #-16]!"
-    else
-        emit "sub $16, %esp"
-        emit "movdqu %xmm1, (%esp)"
-    end
-    mintRetDispatch()
-
-mintAlign(_fr2)
-    if ARM64 or ARM64E
-        emit "str q2, [sp, #-16]!"
-    else
-        emit "sub $16, %esp"
-        emit "movdqu %xmm2, (%esp)"
-    end
-    mintRetDispatch()
-
-mintAlign(_fr3)
-    if ARM64 or ARM64E
-        emit "str q3, [sp, #-16]!"
-    else
-        emit "sub $16, %esp"
-        emit "movdqu %xmm3, (%esp)"
-    end
-    mintRetDispatch()
-
-mintAlign(_stack)
-    # TODO
-    break
-
-mintAlign(_end)
-
-    move PM, MC
-    move PB, PC
-    # Restore PL
-    move ipintCallSavedPL, PL
-    # Restore PB/PM
-    getIPIntCallee()
-    loadp Wasm::IPIntCallee::m_bytecode[ws0], PB
-    loadp Wasm::IPIntCallee::m_metadata[ws0], PM
-    subq PM, MC
-    # Restore IB
-    if ARM64 or ARM64E
-        pcrtoaddr _ipint_unreachable, IB
-    end
-    # Restore memory
-    ipintReloadMemory()
-    nextIPIntInstruction()
 
 uintAlign(_r0)
 _uint_begin:
