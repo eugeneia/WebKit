@@ -569,14 +569,14 @@ WASM_IPINT_EXTERN_CPP_DECL(table_size, int32_t tableIndex)
 #endif
 }
 
-static inline UGPRPair doWasmCall(Wasm::Instance* instance, struct MDCall* call)
+static inline UGPRPair doWasmCall(Wasm::Instance* instance, struct MDCallHeader* call, Register* sp)
 {
     uint32_t importFunctionCount = instance->module().moduleInformation().importFunctionCount();
 
     CodePtr<WasmEntryPtrTag> codePtr;
     EncodedJSValue boxedCallee = CalleeBits::encodeNullCallee();
 
-    auto functionIndex = call->functionIndex;
+    auto functionIndex = call->call.functionIndex;
     if (functionIndex < importFunctionCount) {
         Wasm::Instance::ImportFunctionInfo* functionInfo = instance->importFunctionInfo(functionIndex);
         codePtr = functionInfo->importFunctionStub;
@@ -587,40 +587,6 @@ static inline UGPRPair doWasmCall(Wasm::Instance* instance, struct MDCall* call)
             instance->calleeGroup()->wasmCalleeFromFunctionIndexSpace(functionIndex));
     }
 
-    // arg0
-    // this
-    // argumentCountIncludingThis
-    // callee
-    // codeBlock
-    // return address
-    // callerFrame       [CallFrame*]
-    // ~ fa0 - fa3
-    // ~ a0 - a7
-    // call->calleeFrame
-
-    auto arguments = reinterpret_cast<uint64_t*>(call->callerStack);
-    auto registerSpace = reinterpret_cast<uint64_t*>(call->calleeFrame);
-    auto calleeFrame = reinterpret_cast<CallFrame*>(&registerSpace[12]); // XXX
-
-    const Wasm::TypeDefinition& signature = Wasm::TypeInformation::get(function->typeIndex());
-    const Wasm::FunctionSignature& functionSignature = *signature.as<Wasm::FunctionSignature>();
-    Wasm::CallInformation wasmFrameConvention = Wasm::wasmCallingConvention().callInformationFor(signature, Wasm::CallRole::Caller);
-
-    for (unsigned i = 0; i < functionSignature.argumentCount(); ++i) {
-        auto src = &arguments[-i];
-        auto stackArgument = 0;
-        auto gprArgument = 0;
-        auto fprArgument = 0;
-
-        if (wasmFrameConvention.params[i].location.isStackArgument()) {
-            calleeFrame->setArgument(stackArgument++, static_cast<JSValue>(*src));
-        } else if (wasmFrameConvention.params[i].location.isFPR()) {
-            registerSpace[-(8 + fprArgument++)] = *src;
-        } else {
-            registerSpace[-(0 + gprArgument++)] = *src;
-        }
-    }
-    
     auto stackArgs = call->common.stackSlots;
     Register* partiallyConstructedCalleeFrame = &sp[-safeCast<int>(CallFrameSlot::firstArgument + stackArgs)];
     Register& calleeStackSlot = partiallyConstructedCalleeFrame[static_cast<int>(CallFrameSlot::callee)];
@@ -629,12 +595,12 @@ static inline UGPRPair doWasmCall(Wasm::Instance* instance, struct MDCall* call)
     WASM_CALL_RETURN(instance, codePtr.taggedPtr(), WasmEntryPtrTag);
 }
 
-WASM_IPINT_EXTERN_CPP_DECL(call, struct MDCall* call)
+WASM_IPINT_EXTERN_CPP_DECL(call, struct MDCallHeader* call, Register* sp)
 {
-    return doWasmCall(instance, call);
+    return doWasmCall(instance, call, sp);
 }
 
-WASM_IPINT_EXTERN_CPP_DECL(call_indirect, struct MDCall* call)
+WASM_IPINT_EXTERN_CPP_DECL(call_indirect, struct MDCallIndirectHeader* call, Register* sp)
 {
     CallFrame* callFrame = call->indirect.callFrame;
     unsigned functionIndex = call->indirect.functionRef;

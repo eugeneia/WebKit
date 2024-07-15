@@ -45,16 +45,43 @@ namespace IPInt {
 
 #pragma pack(1)
 
+// mINT: mini-interpreter / minimalist interpreter (whichever floats your boat)
+
+// Metadata structure for calls:
+
+struct MDCallCommonCall {
+    uint16_t stackSlots; // 2B for number of arguments on stack (to set up callee frame)
+};
+
+enum class MINTCall : uint8_t {
+    a = 0x0,          // 0x00 - 0x07: push into a0, a1, ...
+    fa = 0x8,         // 0x08 - 0x0b: push into fa0, fa1, ...
+    stackzero = 0xc,  // 0x0c: pop stack value, push onto stack[0]
+    stackeight = 0xd, // 0x0d: pop stack value, add another 16B for params, push onto stack[8]
+    gap = 0xe,        // 0x0e: add another 16B for params
+    call = 0xf        // 0x0f: stop
+};
+
+// Metadata structure for returns:
+
+struct MDCallCommonReturn {
+    uint16_t stackSlots;    // 2B for number of arguments on stack (to clean up current call frame)
+    uint16_t argumentCount; // 2B for number of arguments (to take off arguments)
+};
+
+enum class MINTReturn : uint8_t {
+    r = 0x0,     // 0x00 - 0x07: r0 - r7
+    fr = 0x8,    // 0x08 - 0x0b: fr0 - fr3
+    stack = 0xc, // 0x0c: stack
+    end = 0xd    // 0x0d: end
+};
+
 // Metadata structure for calls:
 
 struct MDCall {
     // Function index:
     uint8_t length;         // 1B for instruction length
     uint32_t functionIndex; // 4B for decoded index
-    uint32_t frameSize;     // 4B for precomputed frame size
-    void* callerStack;      // pointer to caller stack (set by interpreter)
-    void* calleeFrame;      // pointer to callee frame (set by interpreter)
-    uint64_t savedPL, savedMC;
 };
 
 // Metadata structure for indirect calls:
@@ -66,6 +93,18 @@ struct MDCallIndirect {
     uint32_t typeIndex;   // 4B for type index
     uint32_t functionRef; // 4B for function ref (set by interpreter)
     CallFrame* callFrame; // pointer to call frame (set by interpreter)
+};
+
+// Helpers
+
+struct MDCallHeader {
+    struct MDCall call;
+    struct MDCallCommonCall common;
+};
+
+struct MDCallIndirectHeader {
+    struct MDCallIndirect indirect;
+    struct MDCallCommonCall common;
 };
 
 #pragma pack()

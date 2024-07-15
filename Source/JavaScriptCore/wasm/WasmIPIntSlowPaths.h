@@ -79,9 +79,8 @@ WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(elem_drop, int32_t);
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(table_copy, int32_t*, int32_t, int64_t);
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(table_size, int32_t);
 
-WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(call_indirect, struct MDCallIndirect* call);
-WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(call, struct MDCall* call);
-WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(return, struct MDCall* call);
+WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(call_indirect, struct MDCallIndirectHeader* call, Register* sp);
+WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(call, struct MDCallHeader* call, Register* sp);
 
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(set_global_ref, uint32_t globalIndex, JSValue value);
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(get_global_64, unsigned);
