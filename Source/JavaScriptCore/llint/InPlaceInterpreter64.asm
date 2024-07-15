@@ -293,29 +293,29 @@ instructionLabel(_nop)
 
 instructionLabel(_block)
     # block
-    loadi [PM, MC], PC
-    loadi 4[PM, MC], MC
+    loadi IPInt::MDBlock::newPC[PM, MC], PC
+    loadi IPInt::MDBlock::newMC[PM, MC], MC
     nextIPIntInstruction()
 
 instructionLabel(_loop)
     # loop
     ipintLoopOSR(1)
-    loadb [PM, MC], t0
+    loadb IPInt::MDLoop::instructionLength[PM, MC], t0
     advancePCByReg(t0)
-    advanceMC(1)
+    advanceMC(constexpr (sizeof(IPInt::MDLoop)))
     nextIPIntInstruction()
 
 instructionLabel(_if)
     # if
     popInt32(t0, t1)
     bqneq 0, t0, .ipint_if_taken
-    loadi [PM, MC], PC
-    loadi 4[PM, MC], MC
+    loadi IPInt::MDIf::elsePC[PM, MC], PC
+    loadi IPInt::MDIf::elseMC[PM, MC], MC
     nextIPIntInstruction()
 .ipint_if_taken:
     # Skip LEB128
-    loadb 8[PM, MC], t0
-    advanceMC(9)
+    loadb IPInt::MDIf::instructionLength[PM, MC], t0
+    advanceMC(constexpr (sizeof(IPInt::MDIf)))
     advancePCByReg(t0)
     nextIPIntInstruction()
 
@@ -324,21 +324,21 @@ instructionLabel(_else)
     # Counterintuitively, we only run this instruction if the if
     # clause is TAKEN. This is used to branch to the end of the
     # block.
-    loadi [PM, MC], PC
-    loadi 4[PM, MC], MC
+    loadi IPInt::MDBlock::newPC[PM, MC], PC
+    loadi IPInt::MDBlock::newMC[PM, MC], MC
     nextIPIntInstruction()
 
 instructionLabel(_try)
-    loadb [PM, MC], t0
+    loadb IPInt::MDLength::length[PM, MC], t0
     advancePCByReg(t0)
-    advanceMC(1)
+    advanceMC(constexpr (sizeof(IPInt::MDLength)))
     nextIPIntInstruction()
 
 instructionLabel(_catch)
     # Counterintuitively, like else, we only run this instruction
     # if no exception was thrown during the preceeding try or catch block.
-    loadi [PM, MC], PC
-    loadi 4[PM, MC], MC
+    loadi IPInt::MDBlock::newPC[PM, MC], PC
+    loadi IPInt::MDBlock::newMC[PM, MC], MC
     nextIPIntInstruction()
 
 instructionLabel(_throw)
@@ -350,7 +350,7 @@ instructionLabel(_throw)
 
     move cfr, a1
     move sp, a2
-    loadi [PM, MC], a3
+    loadi IPInt::MDThrow::exceptionIndex[PM, MC], a3
     operationCall(macro() cCall4(_ipint_extern_throw_exception) end)
     jumpToException()
 
@@ -363,7 +363,7 @@ instructionLabel(_rethrow)
 
     move cfr, a1
     move PL, a2
-    loadi [PM, MC], a3
+    loadi IPInt::MDRethrow::tryDepth[PM, MC], a3
     operationCall(macro() cCall4(_ipint_extern_rethrow_exception) end)
     jumpToException()
 
@@ -407,10 +407,9 @@ instructionLabel(_end)
 
 instructionLabel(_br)
     # br
-    # number to pop
-    loadh 8[PM, MC], t0
+    loadh IPInt::MDBranchTarget::toPop[PM, MC], t0
     # number to keep
-    loadh 10[PM, MC], t1
+    loadh IPInt::MDBranchTarget::toKeep[PM, MC], t1
 
     # ex. pop 3 and keep 2
     #
@@ -434,27 +433,27 @@ instructionLabel(_br)
     storeq t0, 8[t2, t3]
     jmp .ipint_br_poploop
 .ipint_br_popend:
-    loadh 8[PM, MC], t0
+    loadh IPInt::MDBranchTarget::toPop[PM, MC], t0
     lshiftq 4, t0
     leap [sp, t0], sp
-    loadi [PM, MC], PC
-    loadi 4[PM, MC], MC
+    loadi IPInt::MDBlock::newPC[PM, MC], PC
+    loadi IPInt::MDBlock::newMC[PM, MC], MC
     nextIPIntInstruction()
 
 instructionLabel(_br_if)
     # pop i32
     popInt32(t0, t2)
     bineq t0, 0, _ipint_br
-    loadb 12[PM, MC], t0
-    advanceMC(13)
+    loadb IPInt::MDBranch::instructionLength[PM, MC], t0
+    advanceMC(constexpr (sizeof(IPInt::MDBranch)))
     advancePCByReg(t0)
     nextIPIntInstruction()
 
 instructionLabel(_br_table)
     # br_table
     popInt32(t0, t2)
-    loadi [PM, MC], t1
-    advanceMC(4)
+    loadi IPInt::MDSwitch::size[PM, MC], t1
+    advanceMC(constexpr (sizeof(IPInt::MDSwitch)))
     bib t0, t1, .ipint_br_table_clamped
     subq t1, 1, t0
 .ipint_br_table_clamped:

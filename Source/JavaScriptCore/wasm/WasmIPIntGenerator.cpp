@@ -1756,8 +1756,11 @@ inline void IPIntGenerator::condenseControlFlowInstructions()
     if (nextOpcode != OpType::Block) {
         // next PC (to skip type signature)
         for (auto offset : m_metadata->m_repeatedControlFlowInstructionMetadataOffsets) {
-            WRITE_TO_METADATA(m_metadata->m_metadata.data() + offset, m_parser->offset() - m_metadata->m_bytecodeOffset, uint32_t);
-            WRITE_TO_METADATA(m_metadata->m_metadata.data() + offset + 4, m_metadata->m_metadata.size(), uint32_t);
+            IPInt::MDBlock block {
+                .newPC = safeCast<uint32_t>(m_parser->offset() - m_metadata->m_bytecodeOffset),
+                .newMC = safeCast<uint32_t>(m_metadata->m_metadata.size())
+            };
+            WRITE_TO_METADATA(m_metadata->m_metadata.data() + offset, block, IPInt::MDBlock);
         }
         m_metadata->m_repeatedControlFlowInstructionMetadataOffsets.clear();
     }
@@ -1770,7 +1773,7 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addBlock(BlockSignature signatu
 
     // Allocate space in metadata
     m_metadata->m_repeatedControlFlowInstructionMetadataOffsets.append(m_metadata->m_metadata.size());
-    m_metadata->addBlankSpace(8);
+    m_metadata->addBlankSpace(sizeof(IPInt::MDBlock));
     condenseControlFlowInstructions();
     return { };
 }
@@ -1785,8 +1788,11 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addLoop(BlockSignature signatur
     auto size = m_metadata->m_metadata.size();
     block.m_pc = m_parser->currentOpcodeStartingOffset() - m_metadata->m_bytecodeOffset;
     block.m_mc = size;
-    m_metadata->addBlankSpace(1);
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, getCurrentInstructionLength(), uint8_t);
+    IPInt::MDLoop loop {
+        .instructionLength = safeCast<uint8_t>(getCurrentInstructionLength())
+    };
+    m_metadata->addBlankSpace(sizeof(loop));
+    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, loop, IPInt::MDLoop);
 
     // Loop OSR
 
@@ -1805,12 +1811,14 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addIf(ExpressionType, BlockSign
     changeStackSize(-1);
     block = ControlType(signature, m_stackSize.value() - newStack.size(), BlockType::If);
     block.m_pendingOffset = m_metadata->m_metadata.size();
-    // 4B PC of else
-    // 4B MC of else
-    auto length = m_metadata->m_metadata.size();
-    m_metadata->addBlankSpace(9);
-    // 1B instruction length
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + length + 8, getCurrentInstructionLength(), uint8_t);
+    IPInt::MDIf mdIf {
+        .elsePC = 0xbeef,
+        .elseMC = 0xbeef,
+        .instructionLength = safeCast<uint8_t>(getCurrentInstructionLength())
+    };
+    auto size = m_metadata->m_metadata.size();
+    m_metadata->addBlankSpace(sizeof(mdIf));
+    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, mdIf, IPInt::MDIf);
     return { };
 }
 
@@ -1830,24 +1838,26 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addElseToUnreachable(ControlTyp
     m_stackSize = block.stackSize();
     changeStackSize(signature.argumentCount());
 
+    auto mdIf = reinterpret_cast<IPInt::MDIf*>(m_metadata->m_metadata.data() + block.m_pendingOffset);
+
     // New PC
     // size - 1 for index of last element
     // - bytecodeOffset since we index starting there in IPInt
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + block.m_pendingOffset, m_parser->offset() - m_metadata->m_bytecodeOffset, uint32_t);
+    mdIf->elsePC = safeCast<uint32_t>(m_parser->offset() - m_metadata->m_bytecodeOffset);
     // New MC
     if (m_parser->currentOpcode() == OpType::End) {
         // Edge case: if ... end with no else: don't actually add in this metadata or else IPInt tries to read the else
         // New MC
-        WRITE_TO_METADATA(m_metadata->m_metadata.data() + block.m_pendingOffset + 4, m_metadata->m_metadata.size(), uint32_t);
+        mdIf->elseMC = safeCast<uint32_t>(m_metadata->m_metadata.size());
         block = ControlType(block.signature(), block.stackSize(), BlockType::Block);
         block.m_pendingOffset = -1;
         return { };
     }
     // New MC
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + block.m_pendingOffset + 4, m_metadata->m_metadata.size() + 8, uint32_t);
+    mdIf->elseMC = safeCast<uint32_t>(m_metadata->m_metadata.size() + sizeof(IPInt::MDBlock));
     block = ControlType(block.signature(), block.stackSize(), BlockType::Block);
     block.m_pendingOffset = m_metadata->m_metadata.size();
-    m_metadata->addBlankSpace(8);
+    m_metadata->addBlankSpace(sizeof(IPInt::MDBlock));
     return { };
 }
 
@@ -1916,12 +1926,15 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addCatchToUnreachable(unsigned 
         exceptionIndex
     });
 
-    auto size = m_metadata->m_metadata.size();
-    m_metadata->addBlankSpace(4);
     // IPInt stack entries are 16 bytes to keep the stack aligned. With the exception of locals, which are only 8 bytes.
     uint32_t stackSizeInV128 = m_stackSize.value() + roundUpToMultipleOf<2>(m_metadata->m_numLocals) / 2;
+    IPInt::MDCatch mdCatch {
+        .stackSizeInV128 = stackSizeInV128
+    };
+    auto size = m_metadata->m_metadata.size();
+    m_metadata->addBlankSpace(sizeof(mdCatch));
     m_catchSPMetadataOffsets.append(size);
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, stackSizeInV128, uint32_t);
+    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, mdCatch, IPInt::MDCatch);
 
     return { };
 }
@@ -1955,12 +1968,15 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addCatchAllToUnreachable(Contro
         0
     });
 
-    auto size = m_metadata->m_metadata.size();
-    m_metadata->addBlankSpace(4);
     // IPInt stack entries are 16 bytes to keep the stack aligned. With the exception of locals, which are only 8 bytes.
     uint32_t stackSizeInV128 = m_stackSize.value() + roundUpToMultipleOf<2>(m_metadata->m_numLocals) / 2;
+    IPInt::MDCatch mdCatch {
+        .stackSizeInV128 = stackSizeInV128
+    };
+    auto size = m_metadata->m_metadata.size();
+    m_metadata->addBlankSpace(sizeof(mdCatch));
     m_catchSPMetadataOffsets.append(size);
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, stackSizeInV128, uint32_t);
+    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, mdCatch, IPInt::MDCatch);
 
     return { };
 }
@@ -1995,9 +2011,12 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addDelegateToUnreachable(Contro
 
 PartialResult WARN_UNUSED_RETURN IPIntGenerator::addThrow(unsigned exceptionIndex, Vector<ExpressionType>&, Stack&)
 {
+    IPInt::MDThrow mdThrow {
+        .exceptionIndex = safeCast<uint32_t>(exceptionIndex)
+    };
     auto size = m_metadata->m_metadata.size();
-    m_metadata->addBlankSpace(4);
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, exceptionIndex, uint32_t);
+    m_metadata->addBlankSpace(sizeof(mdThrow));
+    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, mdThrow, IPInt::MDThrow);
 
     return { };
 }
@@ -2006,9 +2025,12 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addRethrow(unsigned, ControlTyp
 {
     m_usesRethrow = true;
 
+    IPInt::MDRethrow mdRethrow {
+        .tryDepth = catchBlock.m_tryDepth
+    };
     auto size = m_metadata->m_metadata.size();
-    m_metadata->addBlankSpace(4);
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, catchBlock.m_tryDepth, uint32_t);
+    m_metadata->addBlankSpace(sizeof(mdRethrow));
+    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, mdRethrow, IPInt::MDRethrow);
 
     return { };
 }
@@ -2025,12 +2047,18 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addBranch(ControlType& block, E
     if (m_parser->currentOpcode() == OpType::BrIf)
         changeStackSize(-1);
 
+    IPInt::MDBranch branch {
+        .target = {
+            .block = {.newPC = 0xbeef, .newMC = 0xbeef},
+            .toPop = safeCast<uint16_t>(stack.size() - block.branchTargetArity()),
+            .toKeep = safeCast<uint16_t>(block.branchTargetArity()),
+        },
+        .instructionLength = safeCast<uint8_t>(getCurrentInstructionLength())
+    };
     auto size = m_metadata->m_metadata.size();
     block.m_awaitingUpdate.append(size);
-    m_metadata->addBlankSpace(13);
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size + 8, stack.size() - block.branchTargetArity(), uint16_t);
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size + 10, block.branchTargetArity(), uint16_t);
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size + 12, getCurrentInstructionLength(), uint8_t);
+    m_metadata->addBlankSpace(sizeof(branch));
+    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, branch, IPInt::MDBranch);
     return { };
 }
 PartialResult WARN_UNUSED_RETURN IPIntGenerator::addBranchNull(ControlType&, ExpressionType, Stack&, bool, ExpressionType&) IPINT_UNIMPLEMENTED
@@ -2038,27 +2066,34 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addBranchCast(ControlType&, Exp
 
 PartialResult WARN_UNUSED_RETURN IPIntGenerator::addSwitch(ExpressionType, const Vector<ControlType*>& jumps, ControlType& defaultJump, const Stack& stack)
 {
+    IPInt::MDSwitch mdSwitch {
+        .size = safeCast<uint32_t>(jumps.size() + 1),
+        .target = {}
+    };
     auto size = m_metadata->m_metadata.size();
-    // Metadata layout
-    // 0 - 3     number of jump targets (including end)
-    // 8 - 15    4B PC for t0, 4B MC for t0
-    // 16 - 19   2B pop, 2B keep
-    // 20 and on repeat for each branch target
-    m_metadata->addBlankSpace(4);
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, jumps.size() + 1, uint32_t);
+    m_metadata->addBlankSpace(sizeof(mdSwitch.size));
+    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, mdSwitch, IPInt::MDSwitch);
 
     for (auto block : jumps) {
+        IPInt::MDBranchTarget target {
+            .block = {.newPC = 0xbeef, .newMC = 0xbeef},
+            .toPop = safeCast<uint16_t>(stack.size() - block->branchTargetArity()),
+            .toKeep = safeCast<uint16_t>(block->branchTargetArity())
+        };
         auto jumpBase = m_metadata->m_metadata.size();
-        m_metadata->addBlankSpace(12);
+        m_metadata->addBlankSpace(sizeof(target));
         block->m_awaitingUpdate.append(jumpBase);
-        WRITE_TO_METADATA(m_metadata->m_metadata.data() + jumpBase + 8, stack.size() - block->branchTargetArity(), uint16_t);
-        WRITE_TO_METADATA(m_metadata->m_metadata.data() + jumpBase + 10, block->branchTargetArity(), uint16_t);
+        WRITE_TO_METADATA(m_metadata->m_metadata.data() + jumpBase, target, IPInt::MDBranchTarget);
     }
+    IPInt::MDBranchTarget defaultTarget {
+        .block = {.newPC = 0xbeef, .newMC = 0xbeef},
+        .toPop = safeCast<uint16_t>(stack.size() - defaultJump.branchTargetArity()),
+        .toKeep = safeCast<uint16_t>(defaultJump.branchTargetArity())
+    };
     auto defaultJumpBase = m_metadata->m_metadata.size();
-    m_metadata->addBlankSpace(12);
+    m_metadata->addBlankSpace(sizeof(defaultTarget));
     defaultJump.m_awaitingUpdate.append(defaultJumpBase);
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + defaultJumpBase + 8, stack.size() - defaultJump.branchTargetArity(), uint16_t);
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + defaultJumpBase + 10, defaultJump.branchTargetArity(), uint16_t);
+    WRITE_TO_METADATA(m_metadata->m_metadata.data() + defaultJumpBase, defaultTarget, IPInt::MDBranchTarget);
 
     return { };
 }
@@ -2084,16 +2119,21 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addEndToUnreachable(ControlEntr
         // Hit the end
         // Resolve all condensing ends to jump here
         for (auto x : m_metadata->m_repeatedControlFlowInstructionMetadataOffsets) {
-            WRITE_TO_METADATA(m_metadata->m_metadata.data() + x, m_parser->offset() - m_metadata->m_bytecodeOffset - 1, uint32_t);
-            WRITE_TO_METADATA(m_metadata->m_metadata.data() + x + 4, m_metadata->m_metadata.size(), uint32_t);
+            IPInt::MDBlock mdBlock {
+                .newPC = safeCast<uint32_t>(m_parser->offset() - m_metadata->m_bytecodeOffset - 1),
+                .newMC = safeCast<uint32_t>(m_metadata->m_metadata.size())
+            };
+            WRITE_TO_METADATA(m_metadata->m_metadata.data() + x, mdBlock, IPInt::MDBlock);
         }
         m_metadata->m_repeatedControlFlowInstructionMetadataOffsets.clear();
 
         // Final end
         for (auto x : block.m_awaitingUpdate) {
-            WRITE_TO_METADATA(m_metadata->m_metadata.data() + x, m_parser->offset() - m_metadata->m_bytecodeOffset - 1, uint32_t);
-            // New MC
-            WRITE_TO_METADATA(m_metadata->m_metadata.data() + x + 4, m_metadata->m_metadata.size(), uint32_t);
+            IPInt::MDBlock mdBlock {
+                .newPC = safeCast<uint32_t>(m_parser->offset() - m_metadata->m_bytecodeOffset - 1),
+                .newMC = safeCast<uint32_t>(m_metadata->m_metadata.size())
+            };
+            WRITE_TO_METADATA(m_metadata->m_metadata.data() + x, mdBlock, IPInt::MDBlock);
         }
 
         // Metadata = round up 8 bytes, one for each
@@ -2123,16 +2163,21 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addEndToUnreachable(ControlEntr
         }
     } else if (ControlType::isLoop(block)) {
         for (auto x : block.m_awaitingUpdate) {
-            WRITE_TO_METADATA(m_metadata->m_metadata.data() + x, block.m_pc, uint32_t);
-            // New MC
-            WRITE_TO_METADATA(m_metadata->m_metadata.data() + x + 4, block.m_mc, uint32_t);
+            IPInt::MDBlock mdBlock {
+                .newPC = safeCast<uint32_t>(block.m_pc),
+                .newMC = safeCast<uint32_t>(block.m_mc)
+            };
+            WRITE_TO_METADATA(m_metadata->m_metadata.data() + x, mdBlock, IPInt::MDBlock);
         }
     }
 
     if (m_metadata->m_bytecode[m_parser->offset()] != OpType::End) {
         for (auto x : m_metadata->m_repeatedControlFlowInstructionMetadataOffsets) {
-            WRITE_TO_METADATA(m_metadata->m_metadata.data() + x, m_parser->offset() - m_metadata->m_bytecodeOffset - 1, uint32_t);
-            WRITE_TO_METADATA(m_metadata->m_metadata.data() + x + 4, m_metadata->m_metadata.size(), uint32_t);
+            IPInt::MDBlock mdBlock {
+                .newPC = safeCast<uint32_t>(m_parser->offset() - m_metadata->m_bytecodeOffset - 1),
+                .newMC = safeCast<uint32_t>(m_metadata->m_metadata.size())
+            };
+            WRITE_TO_METADATA(m_metadata->m_metadata.data() + x, mdBlock, IPInt::MDBlock);
         }
         m_metadata->m_repeatedControlFlowInstructionMetadataOffsets.clear();
     }
@@ -2193,7 +2238,7 @@ void IPIntGenerator::addCallCommonData(const FunctionSignature& signature)
 
     uint16_t stackSlots = (stackArgs + 1) & (-2);
 
-    struct IPInt::MDCallCommonCall commonCall = {
+    IPInt::MDCallCommonCall commonCall {
         .stackSlots = stackSlots
     };
     auto size = m_metadata->m_metadata.size();
@@ -2210,7 +2255,7 @@ void IPIntGenerator::addCallCommonData(const FunctionSignature& signature)
         minINTBytecode.removeLast();
     }
 
-    struct IPInt::MDCallCommonReturn commonReturn = {
+    IPInt::MDCallCommonReturn commonReturn {
         .stackSlots = stackSlots,
         .argumentCount = safeCast<uint16_t>(signature.argumentCount())
     };
@@ -2273,7 +2318,7 @@ void IPIntGenerator::addCallCommonData(const FunctionSignature& signature)
 
     uint16_t stackSlots = (stackArgs + 1) & (-2);
 
-    struct IPInt::MDCallCommonCall commonCall = {
+    IPInt::MDCallCommonCall commonCall {
         .stackSlots = stackSlots
     };
     auto size = m_metadata->m_metadata.size();
@@ -2290,7 +2335,7 @@ void IPIntGenerator::addCallCommonData(const FunctionSignature& signature)
         minINTBytecode.removeLast();
     }
 
-    struct IPInt::MDCallCommonReturn commonReturn = {
+    IPInt::MDCallCommonReturn commonReturn {
         .stackSlots = stackSlots,
         .argumentCount = safeCast<uint16_t>(signature.argumentCount())
     };
@@ -2333,7 +2378,7 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addCall(uint32_t index, const T
         results.append(Value { });
     changeStackSize(signature.returnCount() - signature.argumentCount());
 
-    struct IPInt::MDCall functionIndexMetadata = {
+    IPInt::MDCall functionIndexMetadata {
         .length = safeCast<uint8_t>(getCurrentInstructionLength()),
         .functionIndex = index
     };
@@ -2352,7 +2397,7 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addCallIndirect(unsigned tableI
     const unsigned callIndex = 1;
     changeStackSize(signature.returnCount() - signature.argumentCount() - callIndex);
 
-    struct IPInt::MDCallIndirect functionIndexMetadata = {
+    IPInt::MDCallIndirect functionIndexMetadata {
         .length = safeCast<uint8_t>(getCurrentInstructionLength()),
         .tableIndex = tableIndex,
         .typeIndex = m_metadata->addSignature(type),
@@ -2361,7 +2406,7 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addCallIndirect(unsigned tableI
     };
     auto size = m_metadata->m_metadata.size();
     m_metadata->addBlankSpace(sizeof(functionIndexMetadata));
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, functionIndexMetadata, struct IPInt::MDCallIndirect);
+    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, functionIndexMetadata, IPInt::MDCallIndirect);
 
     addCallCommonData(signature);
     return { };

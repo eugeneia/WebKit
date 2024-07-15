@@ -52,16 +52,22 @@ void FunctionIPIntMetadataGenerator::addBlankSpace(uint32_t size)
 
 void FunctionIPIntMetadataGenerator::addRawValue(uint64_t value)
 {
+    IPInt::MDRawValue rawValue {
+        .value = value
+    };
     auto size = m_metadata.size();
-    m_metadata.grow(m_metadata.size() + 8);
-    WRITE_TO_METADATA(m_metadata.data() + size, value, uint64_t);
+    m_metadata.grow(m_metadata.size() + sizeof(rawValue));
+    WRITE_TO_METADATA(m_metadata.data() + size, rawValue, IPInt::MDRawValue);
 }
 
 void FunctionIPIntMetadataGenerator::addLength(uint32_t length)
 {
+    IPInt::MDLength mdLength {
+        .length = safeCast<uint8_t>(length)
+    };
     size_t size = m_metadata.size();
-    m_metadata.grow(size + 1);
-    WRITE_TO_METADATA(m_metadata.data() + size, length, uint8_t);
+    m_metadata.grow(size + sizeof(mdLength));
+    WRITE_TO_METADATA(m_metadata.data() + size, mdLength, IPInt::MDLength);
 }
 
 void FunctionIPIntMetadataGenerator::addLEB128ConstantInt32AndLength(uint32_t value, uint32_t length)

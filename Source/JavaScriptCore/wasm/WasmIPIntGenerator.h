@@ -47,6 +47,61 @@ namespace IPInt {
 
 // mINT: mini-interpreter / minimalist interpreter (whichever floats your boat)
 
+// Metadata structure for control flow instructions
+
+struct MDBlock {
+    uint32_t newPC; // 2B for new PC
+    uint32_t newMC; // 2B for new MC
+};
+
+struct MDLoop {
+    uint8_t instructionLength; // 1B for length of current instruction
+};
+
+struct MDIf {
+    uint32_t elsePC; // 4B PC for new else PC
+    uint32_t elseMC; // 4B MC of new else MC
+    uint8_t instructionLength; // 1B instruction length
+};
+
+struct MDThrow {
+    uint32_t exceptionIndex; // 4B for exception index
+};
+
+struct MDRethrow {
+    uint32_t tryDepth; // 4B for try depth
+};
+
+struct MDCatch {
+    uint32_t stackSizeInV128; // 4B for stack size
+};
+
+struct MDBranchTarget {
+    MDBlock block; // 2B for stack values to pop
+    uint16_t toPop; // 2B for stack values to keep
+    uint16_t toKeep;
+};
+
+struct MDBranch {
+    MDBranchTarget target;
+    uint8_t instructionLength; // 1B instruction length
+};
+
+struct MDSwitch {
+    uint32_t size; // 4B for number of jump targets
+    MDBranchTarget target[0];
+};
+
+// Misc. metadata structures
+
+struct MDRawValue {
+    uint64_t value;
+};
+
+struct MDLength {
+    uint8_t length;
+};
+
 // Metadata structure for calls:
 
 struct MDCallCommonCall {
@@ -98,13 +153,13 @@ struct MDCallIndirect {
 // Helpers
 
 struct MDCallHeader {
-    struct MDCall call;
-    struct MDCallCommonCall common;
+    MDCall call;
+    MDCallCommonCall common;
 };
 
 struct MDCallIndirectHeader {
-    struct MDCallIndirect indirect;
-    struct MDCallCommonCall common;
+    MDCallIndirect indirect;
+    MDCallCommonCall common;
 };
 
 #pragma pack()
