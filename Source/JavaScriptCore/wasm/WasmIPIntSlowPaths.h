@@ -66,9 +66,9 @@ WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(rethrow_exception, CallFrame*, uint64_t* pl, u
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(ref_func, unsigned index);
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(table_get, unsigned, unsigned);
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(table_set, unsigned tableIndex, unsigned index, EncodedJSValue value);
-WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(table_init, uint32_t* metadata, uint32_t dest, uint64_t srcAndLength);
-WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(table_fill, uint32_t tableIndex, EncodedJSValue fill, int64_t offsetAndSize);
-WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(table_grow, int32_t tableIndex, EncodedJSValue fill, uint32_t size);
+WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(table_init, MDTableInit* metadata);
+WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(table_fill, MDTableFill* metadata);
+WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(table_grow, MDTableGrow* metadata);
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL_1P(current_memory);
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(memory_grow, int32_t);
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(memory_init, int32_t, int32_t, int64_t);
@@ -76,11 +76,11 @@ WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(data_drop, int32_t);
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(memory_copy, int32_t, int32_t, int32_t);
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(memory_fill, int32_t, int32_t, int32_t);
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(elem_drop, int32_t);
-WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(table_copy, int32_t*, int32_t, int64_t);
+WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(table_copy, MDTableCopy* metadata);
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(table_size, int32_t);
 
-WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(call_indirect, struct MDCallIndirectHeader* call, Register* sp);
-WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(call, struct MDCallHeader* call, Register* sp);
+WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(call_indirect, MDCallIndirectHeader* call, Register* sp);
+WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(call, MDCallHeader* call, Register* sp);
 
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(set_global_ref, uint32_t globalIndex, JSValue value);
 WASM_IPINT_EXTERN_CPP_HIDDEN_DECL(get_global_64, unsigned);

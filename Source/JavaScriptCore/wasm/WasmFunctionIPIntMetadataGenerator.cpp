@@ -45,84 +45,79 @@ unsigned FunctionIPIntMetadataGenerator::addSignature(const TypeDefinition& sign
     return index;
 }
 
-void FunctionIPIntMetadataGenerator::addBlankSpace(uint32_t size)
+void FunctionIPIntMetadataGenerator::addBlankSpace(size_t size)
 {
     m_metadata.grow(m_metadata.size() + size);
 }
 
-void FunctionIPIntMetadataGenerator::addRawValue(uint64_t value)
+void FunctionIPIntMetadataGenerator::addLength(size_t length)
 {
-    IPInt::MDRawValue rawValue {
-        .value = value
-    };
-    auto size = m_metadata.size();
-    m_metadata.grow(m_metadata.size() + sizeof(rawValue));
-    WRITE_TO_METADATA(m_metadata.data() + size, rawValue, IPInt::MDRawValue);
-}
-
-void FunctionIPIntMetadataGenerator::addLength(uint32_t length)
-{
-    IPInt::MDLength mdLength {
+    IPInt::MDInstructionLength MDInstructionLength {
         .length = safeCast<uint8_t>(length)
     };
     size_t size = m_metadata.size();
-    m_metadata.grow(size + sizeof(mdLength));
-    WRITE_TO_METADATA(m_metadata.data() + size, mdLength, IPInt::MDLength);
+    m_metadata.grow(size + sizeof(MDInstructionLength));
+    WRITE_TO_METADATA(m_metadata.data() + size, MDInstructionLength, IPInt::MDInstructionLength);
 }
 
-void FunctionIPIntMetadataGenerator::addLEB128ConstantInt32AndLength(uint32_t value, uint32_t length)
+void FunctionIPIntMetadataGenerator::addLEB128ConstantInt32AndLength(uint32_t value, size_t length)
 {
+    IPInt::MDConst32 mdConst {
+        .instructionLength = { .length = safeCast<uint8_t>(length) },
+        .value = value
+    };
     size_t size = m_metadata.size();
-    m_metadata.grow(size + 5);
-    WRITE_TO_METADATA(m_metadata.data() + size, length, uint8_t);
-    WRITE_TO_METADATA(m_metadata.data() + size + 1, value, uint32_t);
+    m_metadata.grow(size + sizeof(mdConst));
+    WRITE_TO_METADATA(m_metadata.data() + size, mdConst, IPInt::MDConst32);
 }
 
-void FunctionIPIntMetadataGenerator::addCondensedLocalIndexAndLength(uint32_t index, uint32_t length)
-{
-    size_t size = m_metadata.size();
-    if (length == 2) {
-        m_metadata.grow(size + 1);
-        WRITE_TO_METADATA(m_metadata.data() + size, 0, uint8_t);
-    } else {
-        m_metadata.grow(size + 5);
-        WRITE_TO_METADATA(m_metadata.data() + size, length, uint8_t);
-        WRITE_TO_METADATA(m_metadata.data() + size + 1, index, uint32_t);
-    }
-}
-
-void FunctionIPIntMetadataGenerator::addLEB128ConstantAndLengthForType(Type type, uint64_t value, uint32_t length)
+void FunctionIPIntMetadataGenerator::addLEB128ConstantAndLengthForType(Type type, uint64_t value, size_t length)
 {
     if (type.isI32()) {
         size_t size = m_metadata.size();
         if (length == 2) {
-            m_metadata.grow(size + 1);
-            WRITE_TO_METADATA(m_metadata.data() + size, (value >> 7) & 1, uint8_t);
+            IPInt::MDInstructionLength mdConst {
+                .length = safeCast<uint8_t>((value >> 7) & 1)
+            };
+            m_metadata.grow(size + sizeof(mdConst));
+            WRITE_TO_METADATA(m_metadata.data() + size, mdConst, IPInt::MDInstructionLength);
         } else {
-            m_metadata.grow(size + 5);
-            WRITE_TO_METADATA(m_metadata.data() + size, static_cast<uint8_t>(length), uint8_t);
-            WRITE_TO_METADATA(m_metadata.data() + size + 1, static_cast<uint32_t>(value), uint32_t);
+            IPInt::MDConst32 mdConst {
+              .instructionLength = { .length = safeCast<uint8_t>(length) },
+              .value = safeCast<uint32_t>(value)
+            };
+            m_metadata.grow(size + sizeof(mdConst));
+            WRITE_TO_METADATA(m_metadata.data() + size, mdConst, IPInt::MDConst32);
         }
     } else if (type.isI64()) {
         size_t size = m_metadata.size();
-        m_metadata.grow(size + 9);
-        WRITE_TO_METADATA(m_metadata.data() + size, static_cast<uint8_t>(length), uint8_t);
-        WRITE_TO_METADATA(m_metadata.data() + size + 1, static_cast<uint64_t>(value), uint64_t);
+        IPInt::MDConst64 mdConst {
+            .instructionLength = { .length = safeCast<uint8_t>(length) },
+            .value = safeCast<uint32_t>(value)
+        };
+        m_metadata.grow(size + sizeof(mdConst));
+        WRITE_TO_METADATA(m_metadata.data() + size, mdConst, IPInt::MDConst64);
     }  else if (type.isFuncref()) {
         size_t size = m_metadata.size();
-        m_metadata.grow(size + 5);
-        WRITE_TO_METADATA(m_metadata.data() + size, static_cast<uint8_t>(length), uint8_t);
-        WRITE_TO_METADATA(m_metadata.data() + size + 1, static_cast<uint32_t>(value), uint32_t);
+        IPInt::MDConst32 mdConst {
+            .instructionLength = { .length = safeCast<uint8_t>(length) },
+            .value = safeCast<uint32_t>(value)
+        };
+        m_metadata.grow(size + sizeof(mdConst));
+        WRITE_TO_METADATA(m_metadata.data() + size, mdConst, IPInt::MDConst32);
     } else if (!type.isF32() && !type.isF64())
         ASSERT_NOT_IMPLEMENTED_YET();
 }
 
-void FunctionIPIntMetadataGenerator::addLEB128V128Constant(v128_t value, uint32_t length)
+void FunctionIPIntMetadataGenerator::addLEB128V128Constant(v128_t value, size_t length)
 {
+    IPInt::MDConst128 mdConst {
+        .instructionLength = { .length = safeCast<uint8_t>(length) },
+        .value = value
+    };
     size_t size = m_metadata.size();
-    m_metadata.grow(size + 17);
-    WRITE_TO_METADATA(m_metadata.data() + size, static_cast<uint8_t>(length), uint8_t);
-    WRITE_TO_METADATA(m_metadata.data() + size + 1, value, v128_t);
+    m_metadata.grow(size + sizeof(mdConst));
+    WRITE_TO_METADATA(m_metadata.data() + size, mdConst, IPInt::MDConst128);
 }
 
 #if USE(JSVALUE64)

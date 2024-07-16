@@ -630,12 +630,18 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addTableSet(unsigned index, Exp
 PartialResult WARN_UNUSED_RETURN IPIntGenerator::addTableInit(unsigned elementIndex, unsigned tableIndex, ExpressionType, ExpressionType, ExpressionType)
 {
     changeStackSize(-3);
+    IPInt::MDTableInit table {
+        .elementIndex = safeCast<uint32_t>(elementIndex),
+        .tableIndex = safeCast<uint32_t>(tableIndex),
+        .dst = 0xbeef,
+        .src = 0xbeef,
+        .length = 0xbeef,
+        .instructionLength = { .length = safeCast<uint8_t>(getCurrentInstructionLength()) }
+    };
     auto size = m_metadata->m_metadata.size();
-    m_metadata->addBlankSpace(9);
+    m_metadata->addBlankSpace(sizeof(table));
     auto tableInitData = m_metadata->m_metadata.data() + size;
-    WRITE_TO_METADATA(tableInitData, elementIndex, uint32_t);
-    WRITE_TO_METADATA(tableInitData + 4, tableIndex, uint32_t);
-    WRITE_TO_METADATA(tableInitData + 8, getCurrentInstructionLength(), uint8_t);
+    WRITE_TO_METADATA(tableInitData, table, IPInt::MDTableInit);
     return { };
 }
 
@@ -655,26 +661,48 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addTableSize(unsigned tableInde
 PartialResult WARN_UNUSED_RETURN IPIntGenerator::addTableGrow(unsigned tableIndex, ExpressionType, ExpressionType, ExpressionType&)
 {
     changeStackSize(-1);
-    m_metadata->addLEB128ConstantInt32AndLength(tableIndex, getCurrentInstructionLength());
+    IPInt::MDTableGrow table {
+        .tableIndex = safeCast<uint32_t>(tableIndex),
+        .fill = 0xbeef,
+        .length = 0xbeef,
+        .instructionLength = { .length = safeCast<uint8_t>(getCurrentInstructionLength()) }
+    };
+    auto size = m_metadata->m_metadata.size();
+    m_metadata->addBlankSpace(sizeof(table));
+    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, table, IPInt::MDTableGrow);
     return { };
 }
 
 PartialResult WARN_UNUSED_RETURN IPIntGenerator::addTableFill(unsigned tableIndex, ExpressionType, ExpressionType, ExpressionType)
 {
     changeStackSize(-3);
-    m_metadata->addLEB128ConstantInt32AndLength(tableIndex, getCurrentInstructionLength());
+    IPInt::MDTableFill table {
+        .tableIndex = safeCast<uint32_t>(tableIndex),
+        .fill = 0xbeef,
+        .offset = 0xbeef,
+        .length = 0xbeef,
+        .instructionLength = { .length = safeCast<uint8_t>(getCurrentInstructionLength()) }
+    };
+    auto size = m_metadata->m_metadata.size();
+    m_metadata->addBlankSpace(sizeof(table));
+    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, table, IPInt::MDTableFill);
     return { };
 }
 
 PartialResult WARN_UNUSED_RETURN IPIntGenerator::addTableCopy(unsigned dstTableIndex, unsigned srcTableIndex, ExpressionType, ExpressionType, ExpressionType)
 {
     changeStackSize(-3);
+    IPInt::MDTableCopy table {
+        .dstTableIndex = safeCast<uint32_t>(dstTableIndex),
+        .srcTableIndex = safeCast<uint32_t>(srcTableIndex),
+        .dstOffset = 0xbeef,
+        .srcOffset = 0xbeef,
+        .length = 0xbeef,
+        .instructionLength = { .length = safeCast<uint8_t>(getCurrentInstructionLength()) }
+    };
     auto size = m_metadata->m_metadata.size();
     m_metadata->addBlankSpace(9);
-    auto tableInitData = m_metadata->m_metadata.data() + size;
-    WRITE_TO_METADATA(tableInitData, dstTableIndex, uint32_t);
-    WRITE_TO_METADATA(tableInitData + 4, srcTableIndex, uint32_t);
-    WRITE_TO_METADATA(tableInitData + 8, getCurrentInstructionLength(), uint8_t);
+    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, table, IPInt::MDTableCopy);
     return { };
 }
 
@@ -786,42 +814,32 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::setLocal(uint32_t, ExpressionTy
 PartialResult WARN_UNUSED_RETURN IPIntGenerator::getGlobal(uint32_t index, ExpressionType&)
 {
     changeStackSize(1);
-    auto size = m_metadata->m_metadata.size();
-    m_metadata->addBlankSpace(8);
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, index, uint32_t);
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size + 4, getCurrentInstructionLength(), uint16_t);
     const Wasm::GlobalInformation& global = m_info.globals[index];
-    switch (global.bindingMode) {
-    case Wasm::GlobalInformation::BindingMode::EmbeddedInInstance:
-        WRITE_TO_METADATA(m_metadata->m_metadata.data() + size + 6, 0, uint16_t);
-        break;
-    case Wasm::GlobalInformation::BindingMode::Portable:
-        WRITE_TO_METADATA(m_metadata->m_metadata.data() + size + 6, 1, uint16_t);
-        break;
-    }
+    IPInt::MDGlobal mdGlobal {
+        .index = index,
+        .instructionLength = { .length = safeCast<uint8_t>(getCurrentInstructionLength()) },
+        .bindingMode = safeCast<uint8_t>(global.bindingMode),
+        .isRef = safeCast<uint8_t>(isRefType(m_info.globals[index].type))
+    };
+    auto size = m_metadata->m_metadata.size();
+    m_metadata->addBlankSpace(sizeof(mdGlobal));
+    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, mdGlobal, IPInt::MDGlobal);
     return { };
 }
 
 PartialResult WARN_UNUSED_RETURN IPIntGenerator::setGlobal(uint32_t index, ExpressionType)
 {
     changeStackSize(-1);
-    auto size = m_metadata->m_metadata.size();
-    m_metadata->addBlankSpace(8);
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, index, uint32_t);
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size + 4, getCurrentInstructionLength(), uint16_t);
     const Wasm::GlobalInformation& global = m_info.globals[index];
-    switch (global.bindingMode) {
-    case Wasm::GlobalInformation::BindingMode::EmbeddedInInstance:
-        WRITE_TO_METADATA(m_metadata->m_metadata.data() + size + 6, 0, uint8_t);
-        break;
-    case Wasm::GlobalInformation::BindingMode::Portable:
-        WRITE_TO_METADATA(m_metadata->m_metadata.data() + size + 6, 1, uint8_t);
-        break;
-    }
-    if (isRefType(m_info.globals[index].type))
-        WRITE_TO_METADATA(m_metadata->m_metadata.data() + size + 7, 1, uint8_t);
-    else
-        WRITE_TO_METADATA(m_metadata->m_metadata.data() + size + 7, 0, uint8_t);
+    IPInt::MDGlobal mdGlobal {
+        .index = index,
+        .instructionLength = { .length = safeCast<uint8_t>(getCurrentInstructionLength()) },
+        .bindingMode = safeCast<uint8_t>(global.bindingMode),
+        .isRef = safeCast<uint8_t>(isRefType(m_info.globals[index].type))
+    };
+    auto size = m_metadata->m_metadata.size();
+    m_metadata->addBlankSpace(sizeof(mdGlobal));
+    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, mdGlobal, IPInt::MDGlobal);
     return { };
 }
 
@@ -1745,7 +1763,7 @@ IPIntGenerator::ControlType WARN_UNUSED_RETURN IPIntGenerator::addTopLevel(Block
 PartialResult WARN_UNUSED_RETURN IPIntGenerator::addSelect(ExpressionType, ExpressionType, ExpressionType, ExpressionType&)
 {
     changeStackSize(-2);
-    m_metadata->addRawValue(getCurrentInstructionLength());
+    m_metadata->addLength(getCurrentInstructionLength());
     return { };
 }
 
@@ -1788,11 +1806,11 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addLoop(BlockSignature signatur
     auto size = m_metadata->m_metadata.size();
     block.m_pc = m_parser->currentOpcodeStartingOffset() - m_metadata->m_bytecodeOffset;
     block.m_mc = size;
-    IPInt::MDLoop loop {
-        .instructionLength = safeCast<uint8_t>(getCurrentInstructionLength())
+    IPInt::MDInstructionLength loop {
+        .length = safeCast<uint8_t>(getCurrentInstructionLength())
     };
     m_metadata->addBlankSpace(sizeof(loop));
-    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, loop, IPInt::MDLoop);
+    WRITE_TO_METADATA(m_metadata->m_metadata.data() + size, loop, IPInt::MDInstructionLength);
 
     // Loop OSR
 
@@ -1814,7 +1832,7 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addIf(ExpressionType, BlockSign
     IPInt::MDIf mdIf {
         .elsePC = 0xbeef,
         .elseMC = 0xbeef,
-        .instructionLength = safeCast<uint8_t>(getCurrentInstructionLength())
+        .instructionLength = { .length = safeCast<uint8_t>(getCurrentInstructionLength()) }
     };
     auto size = m_metadata->m_metadata.size();
     m_metadata->addBlankSpace(sizeof(mdIf));
@@ -1914,7 +1932,7 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addCatchToUnreachable(unsigned 
 
     // FIXME: If this is actually unreachable we shouldn't need metadata.
     block.m_awaitingUpdate.append(m_metadata->m_metadata.size());
-    m_metadata->addBlankSpace(8);
+    m_metadata->addBlankSpace(sizeof(IPInt::MDBlock));
 
     m_metadata->m_exceptionHandlers.append({
         HandlerType::Catch,
@@ -1956,7 +1974,7 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addCatchAllToUnreachable(Contro
 
     // FIXME: If this is actually unreachable we shouldn't need metadata.
     block.m_awaitingUpdate.append(m_metadata->m_metadata.size());
-    m_metadata->addBlankSpace(8);
+    m_metadata->addBlankSpace(sizeof(IPInt::MDBlock));
 
     m_metadata->m_exceptionHandlers.append({
         HandlerType::CatchAll,
@@ -1991,7 +2009,7 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addDelegateToUnreachable(Contro
     // FIXME: If this is actually unreachable we shouldn't need metadata.
     auto size = m_metadata->m_metadata.size();
     data.m_awaitingUpdate.append(size);
-    m_metadata->addBlankSpace(8);
+    m_metadata->addBlankSpace(sizeof(IPInt::MDBlock));
 
     ASSERT(ControlType::isTry(target) || ControlType::isTopLevel(target));
     unsigned targetDepth = ControlType::isTry(target) ? target.m_tryDepth : 0;
@@ -2053,7 +2071,7 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addBranch(ControlType& block, E
             .toPop = safeCast<uint16_t>(stack.size() - block.branchTargetArity()),
             .toKeep = safeCast<uint16_t>(block.branchTargetArity()),
         },
-        .instructionLength = safeCast<uint8_t>(getCurrentInstructionLength())
+        .instructionLength = { .length = safeCast<uint8_t>(getCurrentInstructionLength()) }
     };
     auto size = m_metadata->m_metadata.size();
     block.m_awaitingUpdate.append(size);

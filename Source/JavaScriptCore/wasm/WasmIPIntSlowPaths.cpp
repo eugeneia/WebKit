@@ -421,50 +421,39 @@ WASM_IPINT_EXTERN_CPP_DECL(table_set, unsigned tableIndex, unsigned index, Encod
 #endif
 }
 
-WASM_IPINT_EXTERN_CPP_DECL(table_init, uint32_t* metadata, uint32_t dest, uint64_t srcAndLength)
+WASM_IPINT_EXTERN_CPP_DECL(table_init, MDTableInit* metadata)
 {
 #if CPU(ARM64) || CPU(X86_64)
-    uint32_t dstOffset = dest;
-    uint32_t srcOffset = srcAndLength >> 32;
-    uint32_t length = srcAndLength & 0xffffffff;
-    if (!Wasm::tableInit(instance, metadata[0], metadata[1], dstOffset, srcOffset, length))
+    if (!Wasm::tableInit(instance, metadata->elementIndex, metadata->tableIndex, metadata->dst, metadata->src, metadata->length))
         WASM_RETURN_TWO(bitwise_cast<void*>(static_cast<uintptr_t>(1)), bitwise_cast<void*>(static_cast<uintptr_t>(Wasm::ExceptionType::OutOfBoundsTableAccess)));
     WASM_RETURN_TWO(0, 0);
 #else
     UNUSED_PARAM(instance);
     UNUSED_PARAM(metadata);
-    UNUSED_PARAM(dest);
-    UNUSED_PARAM(srcAndLength);
     RELEASE_ASSERT_NOT_REACHED("IPInt only supports ARM64 and X86_64 (for now)");
 #endif
 }
 
-WASM_IPINT_EXTERN_CPP_DECL(table_fill, uint32_t tableIndex, EncodedJSValue fill, int64_t offsetAndSize)
+WASM_IPINT_EXTERN_CPP_DECL(table_fill, MDTableFill* metadata)
 {
 #if CPU(ARM64) || CPU(X86_64)
-    uint32_t offset = offsetAndSize >> 32;
-    uint32_t size = offsetAndSize & 0xffffffff;
-    if (!Wasm::tableFill(instance, tableIndex, offset, fill, size))
+    if (!Wasm::tableFill(instance, metadata->tableIndex, metadata->offset, metadata->fill, metadata->length))
         WASM_RETURN_TWO(bitwise_cast<void*>(static_cast<uintptr_t>(1)), bitwise_cast<void*>(static_cast<uintptr_t>(Wasm::ExceptionType::OutOfBoundsTableAccess)));
     WASM_RETURN_TWO(0, 0);
 #else
     UNUSED_PARAM(instance);
-    UNUSED_PARAM(tableIndex);
-    UNUSED_PARAM(fill);
-    UNUSED_PARAM(offsetAndSize);
+    UNUSED_PARAM(metadata);
     RELEASE_ASSERT_NOT_REACHED("IPInt only supports ARM64 and X86_64 (for now)");
 #endif
 }
 
-WASM_IPINT_EXTERN_CPP_DECL(table_grow, int32_t tableIndex, EncodedJSValue fill, uint32_t size)
+WASM_IPINT_EXTERN_CPP_DECL(table_grow, MDTableGrow* metadata)
 {
 #if CPU(ARM64) || CPU(X86_64)
-    WASM_RETURN_TWO(bitwise_cast<void*>(Wasm::tableGrow(instance, tableIndex, fill, size)), 0);
+    WASM_RETURN_TWO(bitwise_cast<void*>(Wasm::tableGrow(instance, metadata->tableIndex, metadata->fill, metadata->length)), 0);
 #else
     UNUSED_PARAM(instance);
-    UNUSED_PARAM(tableIndex);
-    UNUSED_PARAM(fill);
-    UNUSED_PARAM(size);
+    UNUSED_PARAM(metadata);
     RELEASE_ASSERT_NOT_REACHED("IPInt only supported on ARM64 and X86_64 (for now)");
 #endif
 }
@@ -542,17 +531,15 @@ WASM_IPINT_EXTERN_CPP_DECL(elem_drop, int32_t dataIndex)
     WASM_RETURN_TWO(0, 0);
 }
 
-WASM_IPINT_EXTERN_CPP_DECL(table_copy, int32_t* metadata, int32_t dst, int64_t srcAndCount)
+WASM_IPINT_EXTERN_CPP_DECL(table_copy, MDTableCopy* metadata)
 {
 #if CPU(ARM64) || CPU(X86_64)
-    if (!Wasm::tableCopy(instance, metadata[0], metadata[1], dst, srcAndCount >> 32, srcAndCount & 0xffffffff))
+    if (!Wasm::tableCopy(instance, metadata->dstTableIndex, metadata->srcTableIndex, metadata->dstOffset, metadata->srcOffset, metadata->length))
         WASM_RETURN_TWO(bitwise_cast<void*>(static_cast<uintptr_t>(1)), bitwise_cast<void*>(static_cast<uintptr_t>(Wasm::ExceptionType::OutOfBoundsTableAccess)));
     WASM_RETURN_TWO(0, 0);
 #else
     UNUSED_PARAM(instance);
     UNUSED_PARAM(metadata);
-    UNUSED_PARAM(dst);
-    UNUSED_PARAM(srcAndCount);
     RELEASE_ASSERT_NOT_REACHED("IPInt only supported on ARM64 and X86_64 (for now)");
 #endif
 }
@@ -569,7 +556,7 @@ WASM_IPINT_EXTERN_CPP_DECL(table_size, int32_t tableIndex)
 #endif
 }
 
-static inline UGPRPair doWasmCall(Wasm::Instance* instance, struct MDCallHeader* call, Register* sp)
+static inline UGPRPair doWasmCall(Wasm::Instance* instance, MDCallHeader* call, Register* sp)
 {
     uint32_t importFunctionCount = instance->module().moduleInformation().importFunctionCount();
 
@@ -595,12 +582,12 @@ static inline UGPRPair doWasmCall(Wasm::Instance* instance, struct MDCallHeader*
     WASM_CALL_RETURN(instance, codePtr.taggedPtr(), WasmEntryPtrTag);
 }
 
-WASM_IPINT_EXTERN_CPP_DECL(call, struct MDCallHeader* call, Register* sp)
+WASM_IPINT_EXTERN_CPP_DECL(call, MDCallHeader* call, Register* sp)
 {
     return doWasmCall(instance, call, sp);
 }
 
-WASM_IPINT_EXTERN_CPP_DECL(call_indirect, struct MDCallIndirectHeader* call, Register* sp)
+WASM_IPINT_EXTERN_CPP_DECL(call_indirect, MDCallIndirectHeader* call, Register* sp)
 {
     CallFrame* callFrame = call->indirect.callFrame;
     unsigned functionIndex = call->indirect.functionRef;

@@ -49,19 +49,19 @@ namespace IPInt {
 
 // Metadata structure for control flow instructions
 
+struct MDInstructionLength {
+    uint8_t length; // 1B for length of current instruction
+};
+
 struct MDBlock {
     uint32_t newPC; // 2B for new PC
     uint32_t newMC; // 2B for new MC
 };
 
-struct MDLoop {
-    uint8_t instructionLength; // 1B for length of current instruction
-};
-
 struct MDIf {
     uint32_t elsePC; // 4B PC for new else PC
     uint32_t elseMC; // 4B MC of new else MC
-    uint8_t instructionLength; // 1B instruction length
+    MDInstructionLength instructionLength;
 };
 
 struct MDThrow {
@@ -84,7 +84,7 @@ struct MDBranchTarget {
 
 struct MDBranch {
     MDBranchTarget target;
-    uint8_t instructionLength; // 1B instruction length
+    MDInstructionLength instructionLength;
 };
 
 struct MDSwitch {
@@ -92,14 +92,63 @@ struct MDSwitch {
     MDBranchTarget target[0];
 };
 
-// Misc. metadata structures
+// Global get/set metadata structure
 
-struct MDRawValue {
+struct MDGlobal {
+    uint32_t index; // 4B for index of global
+    MDInstructionLength instructionLength;
+    uint8_t bindingMode; // 1B for bindingMode
+    uint8_t isRef; // 1B for ref flag
+};
+
+// Constant metadat structures
+
+struct MDConst32 {
+    MDInstructionLength instructionLength;
+    uint32_t value;
+};
+
+struct MDConst64 {
+    MDInstructionLength instructionLength;
     uint64_t value;
 };
 
-struct MDLength {
-    uint8_t length;
+struct MDConst128 {
+    MDInstructionLength instructionLength;
+    v128_t value;
+};
+
+struct MDTableInit {
+    uint32_t elementIndex; // 4B for index of element
+    uint32_t tableIndex; // 4B for index of table
+    uint32_t dst; // 4B for destination (set by interpreter)
+    uint32_t src; // 4B for source (set by interpreter)
+    uint32_t length; // 4B for length (set by interpreter)
+    MDInstructionLength instructionLength;
+};
+
+struct MDTableFill {
+    uint32_t tableIndex; // 4B for index of table
+    EncodedJSValue fill; // 8B for fill value
+    uint32_t offset; // 4B for offset (set by interpreter)
+    uint32_t length; // 4B for length (set by interpreter)
+    MDInstructionLength instructionLength;
+};
+
+struct MDTableGrow {
+    uint32_t tableIndex; // 4B for index of table
+    EncodedJSValue fill; // 8B for fill value
+    uint32_t length; // 4B for length (set by interpreter)
+    MDInstructionLength instructionLength;
+};
+
+struct MDTableCopy {
+    uint32_t dstTableIndex; // 4B for index of destination table
+    uint32_t srcTableIndex; // 4B for index of source table
+    uint32_t dstOffset; // 4B for destination offset (set by interpreter)
+    uint32_t srcOffset; // 4B for source offset (set by interpreter)
+    uint32_t length; // 4B for length (set by interpreter)
+    MDInstructionLength instructionLength;
 };
 
 // Metadata structure for calls:
