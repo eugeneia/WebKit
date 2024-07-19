@@ -153,8 +153,25 @@ struct MDTableCopy {
 
 // Metadata structure for calls:
 
-struct MDCallCommonCall {
-    uint16_t stackSlots; // 2B for number of arguments on stack (to set up callee frame)
+struct MDCallEntry {
+    Wasm::Instance* instance; // Ptr for callee instance (set by operation)
+    void* entrypoint; // Ptr for callee entrypoint (set by operation)
+    EncodedJSValue boxedCallee; // 8B for callee (set by operation)
+};
+
+struct MDCall {
+    uint8_t length;         // 1B for instruction length
+    uint32_t functionIndex; // 4B for decoded index
+    MDCallEntry callee;
+};
+
+struct MDCallIndirect {
+    uint8_t length;       // 1B for length
+    uint32_t tableIndex;  // 4B for table index
+    uint32_t typeIndex;   // 4B for type index
+    uint32_t functionRef; // 4B for function ref (set by interpreter)
+    CallFrame* callFrame; // Ptr for call frame (set by interpreter)
+    MDCallEntry callee;
 };
 
 enum class MINTCall : uint8_t {
@@ -168,7 +185,7 @@ enum class MINTCall : uint8_t {
 
 // Metadata structure for returns:
 
-struct MDCallCommonReturn {
+struct MDCallReturn {
     uint16_t stackSlots;    // 2B for number of arguments on stack (to clean up current call frame)
     uint16_t argumentCount; // 2B for number of arguments (to take off arguments)
 };
@@ -178,37 +195,6 @@ enum class MINTReturn : uint8_t {
     fr = 0x8,    // 0x08 - 0x0b: fr0 - fr3
     stack = 0xc, // 0x0c: stack
     end = 0xd    // 0x0d: end
-};
-
-// Metadata structure for calls:
-
-struct MDCall {
-    // Function index:
-    uint8_t length;         // 1B for instruction length
-    uint32_t functionIndex; // 4B for decoded index
-};
-
-// Metadata structure for indirect calls:
-
-struct MDCallIndirect {
-    // Function index:
-    uint8_t length;       // 1B for length
-    uint32_t tableIndex;  // 4B for table index
-    uint32_t typeIndex;   // 4B for type index
-    uint32_t functionRef; // 4B for function ref (set by interpreter)
-    CallFrame* callFrame; // pointer to call frame (set by interpreter)
-};
-
-// Helpers
-
-struct MDCallHeader {
-    MDCall call;
-    MDCallCommonCall common;
-};
-
-struct MDCallIndirectHeader {
-    MDCallIndirect indirect;
-    MDCallCommonCall common;
 };
 
 #pragma pack()

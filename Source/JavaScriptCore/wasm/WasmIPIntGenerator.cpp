@@ -2250,37 +2250,26 @@ void IPIntGenerator::addCallCommonData(const FunctionSignature& signature)
             ++stackArgs;
         }
     }
-
     if (stackArgs & 1)
         minINTBytecode.append(static_cast<uint8_t>(IPInt::MINTCall::gap));
 
-    uint16_t stackSlots = (stackArgs + 1) & (-2);
-
-    IPInt::MDCallCommonCall commonCall {
-        .stackSlots = stackSlots
-    };
     auto size = m_metadata->m_metadata.size();
-    m_metadata->addBlankSpace(sizeof(commonCall));
-    auto data = m_metadata->m_metadata.data() + size;
-    WRITE_TO_METADATA(data, commonCall, IPInt::MDCallCommonCall);
-
-    size = m_metadata->m_metadata.size();
     m_metadata->addBlankSpace(minINTBytecode.size());
-    data = m_metadata->m_metadata.data() + size;
+    auto data = m_metadata->m_metadata.data() + size;
     while (!minINTBytecode.isEmpty()) {
         WRITE_TO_METADATA(data, minINTBytecode.last(), uint8_t);
         data += 1;
         minINTBytecode.removeLast();
     }
 
-    IPInt::MDCallCommonReturn commonReturn {
-        .stackSlots = stackSlots,
+    IPInt::MDCallReturn commonReturn {
+        .stackSlots = safeCast<uint16_t>((stackArgs + 1) & (-2)),
         .argumentCount = safeCast<uint16_t>(signature.argumentCount())
     };
     size = m_metadata->m_metadata.size();
     m_metadata->addBlankSpace(sizeof(commonReturn));
     data = m_metadata->m_metadata.data() + size;
-    WRITE_TO_METADATA(data, commonReturn, IPInt::MDCallCommonReturn);
+    WRITE_TO_METADATA(data, commonReturn, IPInt::MDCallReturn);
 
     minINTBytecode.clear();
 
@@ -2330,37 +2319,26 @@ void IPIntGenerator::addCallCommonData(const FunctionSignature& signature)
             ++stackArgs;
         }
     }
-
     if (stackArgs & 1)
         minINTBytecode.append(static_cast<uint8_t>(IPInt::MINTCall::gap));
 
-    uint16_t stackSlots = (stackArgs + 1) & (-2);
-
-    IPInt::MDCallCommonCall commonCall {
-        .stackSlots = stackSlots
-    };
     auto size = m_metadata->m_metadata.size();
-    m_metadata->addBlankSpace(sizeof(commonCall));
-    auto data = m_metadata->m_metadata.data() + size;
-    WRITE_TO_METADATA(data, commonCall, IPInt::MDCallCommonCall);
-
-    size = m_metadata->m_metadata.size();
     m_metadata->addBlankSpace(minINTBytecode.size());
-    data = m_metadata->m_metadata.data() + size;
+    auto data = m_metadata->m_metadata.data() + size;
     while (!minINTBytecode.isEmpty()) {
         WRITE_TO_METADATA(data, minINTBytecode.last(), uint8_t);
         data += 1;
         minINTBytecode.removeLast();
     }
 
-    IPInt::MDCallCommonReturn commonReturn {
-        .stackSlots = stackSlots,
+    IPInt::MDCallReturn commonReturn {
+        .stackSlots = safeCast<uint16_t>((stackArgs + 1) & (-2)),
         .argumentCount = safeCast<uint16_t>(signature.argumentCount())
     };
     size = m_metadata->m_metadata.size();
     m_metadata->addBlankSpace(sizeof(commonReturn));
     data = m_metadata->m_metadata.data() + size;
-    WRITE_TO_METADATA(data, commonReturn, IPInt::MDCallCommonReturn);
+    WRITE_TO_METADATA(data, commonReturn, IPInt::MDCallReturn);
 
     minINTBytecode.clear();
 
@@ -2398,7 +2376,12 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addCall(uint32_t index, const T
 
     IPInt::MDCall functionIndexMetadata {
         .length = safeCast<uint8_t>(getCurrentInstructionLength()),
-        .functionIndex = index
+        .functionIndex = index,
+        .callee = {
+            .instance = nullptr,
+            .entrypoint = nullptr,
+            .boxedCallee = 0xbeef
+        }
     };
     auto size = m_metadata->m_metadata.size();
     m_metadata->addBlankSpace(sizeof(functionIndexMetadata));
@@ -2420,7 +2403,12 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addCallIndirect(unsigned tableI
         .tableIndex = tableIndex,
         .typeIndex = m_metadata->addSignature(type),
         .functionRef = 0xBEEF,
-        .callFrame = nullptr
+        .callFrame = nullptr,
+        .callee = {
+            .instance = nullptr,
+            .entrypoint = nullptr,
+            .boxedCallee = 0xbeef
+        }
     };
     auto size = m_metadata->m_metadata.size();
     m_metadata->addBlankSpace(sizeof(functionIndexMetadata));
