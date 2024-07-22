@@ -3065,7 +3065,7 @@ mintAlign(_call)
 
     # Set up callee slot
     loadp IPInt::MDCallEntry::boxedCallee[ipintCallSavedMDCallEntry], wasmInstance
-    storep wasmInstance, ThisArgumentOffset - Callee[sp]
+    storep wasmInstance, Callee - CallerFrameAndPCSize[sp]
 
     # Swap instances
     loadp IPInt::MDCallEntry::instance[ipintCallSavedMDCallEntry], wasmInstance
