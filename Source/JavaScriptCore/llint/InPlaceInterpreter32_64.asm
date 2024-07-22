@@ -376,20 +376,6 @@ instructionLabel(_return)
     # dispatch and end of program check for speed
     jmp .ipint_end_ret
 
-# stack alignment
-const ipintCallStackStackAlign = CallFrameAlignSlots * SlotSize
-
-# stack space to stash things
-# (ipintCallSavedEntrypoint, ipintCallSavedInstance, PL, PM)
-const ipintCallStashedPM = ipintCallStackStackAlign
-const ipintCallStashedPL = ipintCallStashedPM + MachineRegisterSize
-const ipintCallStashedInstance = ipintCallStashedPL + MachineRegisterSize
-const ipintCallStashedEntrypoint = ipintCallStashedInstance + MachineRegisterSize
-const ipintCallStashSize = 4 * MachineRegisterSize
-
-# XXX hack: stack offset to make sure _ipint_extern_call doesn't clobber its own frame
-const ipintCallStackSafeSpace = 512
-
 instructionLabel(_call)
     storei PC, CallSiteIndex[cfr]
 
@@ -406,23 +392,16 @@ instructionLabel(_call_indirect)
     # Stash cfr
     storep cfr, IPInt::MDCallIndirect::callFrame[PM, MC]
 
-    # carve out stash space and prepare stack pointer alignment
-    subp ipintCallStackStackAlign + ipintCallStashSize, sp
-
-    # sp
-    move sp, a2
-    # Get MDCallHeader
+    # Get IPInt::MDCallIndirect
     leap [PM, MC], a1
-    subp ipintCallStackSafeSpace, sp
     operationCall(macro() cCall2(_ipint_extern_call_indirect) end)
-    addp ipintCallStackSafeSpace, sp
     btpz r1, .ipint_call_indirect_throw
     # r0 = entrypoint
     # r1 = wasmInstance
 
     loadb IPInt::MDCallIndirect::length[PM, MC], t2
     advancePCByReg(t2)
-    advanceMC(constexpr (sizeof(IPInt::MDCallIndirectHeader)))
+    advanceMC(constexpr (sizeof(IPInt::MDCallIndirect)))
 
     jmp .ipint_call_common
 .ipint_call_indirect_throw:
@@ -2989,19 +2968,11 @@ _ipint_call_impl:
     loadb IPInt::MDCall::length[PM, MC], t0
     advancePCByReg(t0)
 
-    # carve out stash space and prepare stack pointer alignment
-    subp ipintCallStackStackAlign + ipintCallStashSize, sp
-
-    # sp
-    move sp, a2
-    # Get MDCallHeader
+    # Get IPInt::MDCall
     leap [PM, MC], a1
-    advanceMC(constexpr (sizeof(IPInt::MDCallHeader)))
-    subp ipintCallStackSafeSpace, sp
+    advanceMC(constexpr (sizeof(IPInt::MDCall)))
     operationCall(macro() cCall2(_ipint_extern_call) end)
-    addp ipintCallStackSafeSpace, sp
-    # r0 = entrypoint
-    # r1 = wasmInstance
+    # r0 = IPInt::MDCallEntry*
 
 .ipint_call_common:
     # CANNOT throw away: entrypoint, PM
@@ -3009,18 +2980,26 @@ _ipint_call_impl:
     # for call: MUST preserve MC
     # for call: PB/PM (load from callee)
 
+    const ipintCallSavedMDCallEntry = PB
+
     # shadow stack pointer
     const ipintCallShadowSP = t5
+
     move sp, ipintCallShadowSP
-    addp ipintCallStackStackAlign + ipintCallStashSize, ipintCallShadowSP
 
-    storep r0, ipintCallStashedEntrypoint[sp]
-    storep r1, ipintCallStashedInstance[sp]
-
-    storep PL, ipintCallStashedPL[sp]
+    # Free up r0 to be used as argument register
+    move r0, ipintCallSavedMDCallEntry
 
     # We'll update PM to be the value that the return metadata starts at
     addp MC, PM
+    
+    # Save PL, PM
+    push PL, PM
+
+    # Align stack
+    const ipintCallStackStackAlign = CallFrameAlignSlots * SlotSize
+    subp ipintCallStackStackAlign, sp
+
     mintArgDispatch()
 
 mintAlign(_a0)
@@ -3074,29 +3053,29 @@ mintAlign(_gap)
     break
 
 mintAlign(_call)
-    const ipintCallSavedInstance = t5
-    loadp ipintCallStashedInstance[sp], ipintCallSavedInstance
-    const ipintCallSavedEntrypoint = PB
-    loadp ipintCallStashedEntrypoint[sp], ipintCallSavedEntrypoint
-
-    # Save PM (conflicts with wasmInstance)
-    storep PM, ipintCallStashedPM[sp]
-
     # Set up the rest of the stack frame
     subp FirstArgumentOffset - CallerFrameAndPCSize, sp
 
-    storep PC, ThisArgumentOffset - CallerFrameAndPCSize[sp]
+    # wasmInstance = PC
+    storep wasmInstance, ThisArgumentOffset - CallerFrameAndPCSize[sp]
+
+    # Set up callee slot
+    loadp IPInt::MDCallEntry::boxedCallee[ipintCallSavedMDCallEntry], wasmInstance
+    storep wasmInstance, ThisArgumentOffset - Callee[sp]
+
+    # Swap instances
+    loadp IPInt::MDCallEntry::instance[ipintCallSavedMDCallEntry], wasmInstance
 
     # Make the call
-    move ipintCallSavedInstance, wasmInstance
-    call ipintCallSavedEntrypoint, JSEntrySlowPathPtrTag
+    loadp IPInt::MDCallEntry::entrypoint[ipintCallSavedMDCallEntry], ipintCallSavedMDCallEntry
+    call ipintCallSavedMDCallEntry, JSEntrySlowPathPtrTag
 
     loadp ThisArgumentOffset - CallerFrameAndPCSize[sp], PC
     # Restore the stack pointer
     addp FirstArgumentOffset - CallerFrameAndPCSize, sp
+    addp ipintCallStackStackAlign, sp
 
-    loadp ipintCallStashedPM[sp], PM
-
+    pop PM
     # Hey, look. PM hasn't been used to store anything.
     # No need to compute anything, just directly load stuff we need.
     loadh [PM], t5  # number of stack args
@@ -3105,17 +3084,14 @@ mintAlign(_call)
     const ipintCallSavedPL = PB
 
     # Grab PL
-    loadp ipintCallStashedPL[sp], ipintCallSavedPL
-
-    # restore sp
-    addp ipintCallStackStackAlign + ipintCallStashSize, sp
+    pop ipintCallSavedPL
 
     # Adjust sp to pop off arguments consumed
     # (mint popped off ipintCallShadowSP)
-    loadh IPInt::MDCallCommonReturn::argumentCount[PM], t5
+    loadh IPInt::MDCallReturn::argumentCount[PM], t5
     lshiftp 4, t5
     addp t5, sp
-    addp constexpr (sizeof(IPInt::MDCallCommonReturn)), PM
+    addp constexpr (sizeof(IPInt::MDCallReturn)), PM
     mintRetDispatch()
 
 mintAlign(_r0)
