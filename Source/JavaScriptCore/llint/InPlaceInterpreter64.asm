@@ -1139,23 +1139,19 @@ instructionLabel(_i64_const)
 instructionLabel(_f32_const)
     # f32.const
     # Load pre-computed value from metadata
-    loadf IPInt::MDConst32::value[PM, MC], ft0
+    loadf 1[PB, PC], ft0
     pushFloat32FT0()
-    loadb IPInt::MDConst32::instructionLength[PM, MC], t0
 
-    advancePCByReg(t0)
-    advanceMC(constexpr (sizeof(IPInt::MDConst32)))
+    advancePC(5)
     nextIPIntInstruction()
 
 instructionLabel(_f64_const)
     # f64.const
     # Load pre-computed value from metadata
-    loadd IPInt::MDConst64::value[PM, MC], ft0
+    loadd 1[PB, PC], ft0
     pushFloat64FT0()
-    loadb IPInt::MDConst64::instructionLength[PM, MC], t0
 
-    advancePCByReg(t0)
-    advanceMC(constexpr (sizeof(IPInt::MDConst64)))
+    advancePC(9)
     nextIPIntInstruction()
 
     ###############################

@@ -1005,25 +1005,21 @@ instructionLabel(_i64_const)
 instructionLabel(_f32_const)
     # f32.const
     # Load pre-computed value from metadata
-    loadi IPInt::MDConst32::value[PM, MC], t0 # NB: can be unaligned, hence loadi, fi2f instead of loadf (VLDR)
+    loadi 1[PB, PC], t0 # NB: can be unaligned, hence loadi, fi2f instead of loadf (VLDR)
     fi2f t0, ft0
     pushFloat32FT0()
-    loadb IPInt::MDConst32::instructionLength[PM, MC], t0
 
-    advancePCByReg(t0)
-    advanceMC(constexpr (sizeof(IPInt::MDConst32)))
+    advancePC(5)
     nextIPIntInstruction()
 
 instructionLabel(_f64_const)
     # f64.const
     # Load pre-computed value from metadata
-    load2ia IPInt::MDConst64::value[PM, MC], t0, t1 # NB: can be unaligned, hence loadi, fii2d instead of loadd
+    load2ia 1[PB, PC], t0, t1 # NB: can be unaligned, hence loadi, fii2d instead of loadd
     fii2d t0, t1, ft0
     pushFloat64FT0()
-    loadb IPInt::MDConst64::instructionLength[PM, MC], t0
 
-    advancePCByReg(t0)
-    advanceMC(constexpr (sizeof(IPInt::MDConst64)))
+    advancePC(9)
     nextIPIntInstruction()
 
     ###############################
