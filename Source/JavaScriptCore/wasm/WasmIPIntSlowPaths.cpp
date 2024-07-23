@@ -64,8 +64,10 @@ namespace JSC { namespace IPInt {
         WASM_RETURN_TWO(LLInt::wasmExceptionInstructions(), 0); \
     } while (false)
 
-#define WASM_CALL_TARGET(callTarget, callTargetTag) \
-        retagCodePtr<callTargetTag, JSEntrySlowPathPtrTag>(callTarget)
+#define WASM_CALL_RETURN(callee, callTarget, callTargetTag) do { \
+        callee.entrypoint = retagCodePtr<callTargetTag, JSEntrySlowPathPtrTag>(callTarget); \
+        WASM_RETURN_TWO(&callee, callee.instance); \
+    } while (false)
 
 #define IPINT_CALLEE(callFrame) \
     static_cast<Wasm::IPIntCallee*>(callFrame->callee().asNativeCallee())
@@ -575,9 +577,8 @@ static inline UGPRPair doWasmCall(Wasm::Instance* instance, MDCall* call)
 
     call->callee.boxedCallee = boxedCallee;
     call->callee.instance = instance;
-    call->callee.entrypoint = WASM_CALL_TARGET(codePtr.taggedPtr(), WasmEntryPtrTag);
 
-    WASM_RETURN_TWO(&call->callee, 0);
+    WASM_CALL_RETURN(call->callee, codePtr.taggedPtr(), WasmEntryPtrTag);
 }
 
 WASM_IPINT_EXTERN_CPP_DECL(call, MDCall* call)
@@ -610,9 +611,8 @@ WASM_IPINT_EXTERN_CPP_DECL(call_indirect, MDCallIndirect* call)
     else
         call->callee.boxedCallee = CalleeBits::encodeNullCallee();
     call->callee.instance = function.m_instance;
-    call->callee.entrypoint = WASM_CALL_TARGET(function.m_function.entrypointLoadLocation->taggedPtr(), WasmEntryPtrTag);
 
-    WASM_RETURN_TWO(&call->callee, 0);
+    WASM_CALL_RETURN(call->callee, function.m_function.entrypointLoadLocation->taggedPtr(), WasmEntryPtrTag);
 }
 
 WASM_IPINT_EXTERN_CPP_DECL(set_global_ref, uint32_t globalIndex, JSValue value)
