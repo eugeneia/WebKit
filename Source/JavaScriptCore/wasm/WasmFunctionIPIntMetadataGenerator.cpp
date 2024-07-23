@@ -84,7 +84,7 @@ void FunctionIPIntMetadataGenerator::addLEB128ConstantAndLengthForType(Type type
         } else {
             IPInt::MDConst32 mdConst {
               .instructionLength = { .length = safeCast<uint8_t>(length) },
-              .value = safeCast<uint32_t>(value)
+              .value = static_cast<uint32_t>(value)
             };
             m_metadata.grow(size + sizeof(mdConst));
             WRITE_TO_METADATA(m_metadata.data() + size, mdConst, IPInt::MDConst32);
@@ -93,7 +93,7 @@ void FunctionIPIntMetadataGenerator::addLEB128ConstantAndLengthForType(Type type
         size_t size = m_metadata.size();
         IPInt::MDConst64 mdConst {
             .instructionLength = { .length = safeCast<uint8_t>(length) },
-            .value = safeCast<uint32_t>(value)
+            .value = static_cast<uint64_t>(value)
         };
         m_metadata.grow(size + sizeof(mdConst));
         WRITE_TO_METADATA(m_metadata.data() + size, mdConst, IPInt::MDConst64);
@@ -101,7 +101,7 @@ void FunctionIPIntMetadataGenerator::addLEB128ConstantAndLengthForType(Type type
         size_t size = m_metadata.size();
         IPInt::MDConst32 mdConst {
             .instructionLength = { .length = safeCast<uint8_t>(length) },
-            .value = safeCast<uint32_t>(value)
+            .value = static_cast<uint32_t>(value)
         };
         m_metadata.grow(size + sizeof(mdConst));
         WRITE_TO_METADATA(m_metadata.data() + size, mdConst, IPInt::MDConst32);
