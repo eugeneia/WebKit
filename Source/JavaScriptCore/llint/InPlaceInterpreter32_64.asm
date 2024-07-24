@@ -2980,25 +2980,25 @@ _ipint_call_impl:
     # for call: MUST preserve MC
     # for call: PB/PM (load from callee)
 
-    const ipintCallSavedMDCallEntry = PB
+    const ipintCallSavedCallee = MC
 
     # shadow stack pointer
     const ipintCallShadowSP = t5
 
     move sp, ipintCallShadowSP
 
-    # Free up r0 to be used as argument register
-    move r0, ipintCallSavedMDCallEntry
-
     # We'll update PM to be the value that the return metadata starts at
     addp MC, PM
     
-    # Save PL, PM
-    push PL, PM
+    # Save PL
+    push PL
 
-    # Align stack
-    const ipintCallStackStackAlign = CallFrameAlignSlots * SlotSize
-    subp ipintCallStackStackAlign, sp
+    # Free up r0 to be used as argument register
+    move r0, ipintCallSavedCallee
+
+    # Align stack (not needed because we pushed PL)
+    # const ipintCallStackStackAlign = CallFrameAlignSlots * SlotSize
+    # subp ipintCallStackStackAlign, sp
 
     mintArgDispatch()
 
@@ -3053,35 +3053,38 @@ mintAlign(_gap)
     break
 
 mintAlign(_call)
+    # Save PM (conflicts with wasmInstance)
+    const ipintCallSavedPM = PB
+    move PM, ipintCallSavedPM
+
     # Set up the rest of the stack frame
     subp FirstArgumentOffset - CallerFrameAndPCSize, sp
 
-    # wasmInstance = PC
-    storep wasmInstance, ThisArgumentOffset - CallerFrameAndPCSize[sp]
+    storep PC, ThisArgumentOffset - CallerFrameAndPCSize[sp]
 
     # Set up callee slot
-    loadp IPInt::MDCallEntry::boxedCallee[ipintCallSavedMDCallEntry], wasmInstance
-    storep wasmInstance, Callee - CallerFrameAndPCSize[sp]
+    loadp IPInt::MDCallEntry::boxedCallee[ipintCallSavedCallee], PC
+    storep PC, Callee - CallerFrameAndPCSize[sp]
 
     # Swap instances
-    loadp IPInt::MDCallEntry::instance[ipintCallSavedMDCallEntry], wasmInstance
+    loadp IPInt::MDCallEntry::instance[ipintCallSavedCallee], wasmInstance
 
     # Make the call
-    loadp IPInt::MDCallEntry::entrypoint[ipintCallSavedMDCallEntry], ipintCallSavedMDCallEntry
-    call ipintCallSavedMDCallEntry, JSEntrySlowPathPtrTag
+    loadp IPInt::MDCallEntry::entrypoint[ipintCallSavedCallee], ipintCallSavedCallee
+    call ipintCallSavedCallee, JSEntrySlowPathPtrTag
 
     loadp ThisArgumentOffset - CallerFrameAndPCSize[sp], PC
     # Restore the stack pointer
     addp FirstArgumentOffset - CallerFrameAndPCSize, sp
-    addp ipintCallStackStackAlign, sp
+    #addp ipintCallStackStackAlign, sp
 
-    pop PM
+    move ipintCallSavedPM, PM
     # Hey, look. PM hasn't been used to store anything.
     # No need to compute anything, just directly load stuff we need.
-    loadh [PM], t5  # number of stack args
+    loadh IPInt::MDCallReturn::stackSlots[PM], t5  # number of stack args
     leap [sp, t5, 8], sp
 
-    const ipintCallSavedPL = PB
+    const ipintCallSavedPL = MC
 
     # Grab PL
     pop ipintCallSavedPL
