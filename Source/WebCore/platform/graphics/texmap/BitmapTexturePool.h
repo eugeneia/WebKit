@@ -63,6 +63,7 @@ private:
     Vector<Entry> m_textures;
     RunLoop::Timer m_releaseUnusedTexturesTimer;
     uint64_t m_poolSize { 0 };
+    uint64_t m_poolSizeLimit { 0 };
     bool m_onLimitExceededMode { false };
     Seconds m_releaseUnusedSecondsTolerance;
     Seconds m_releaseUnusedTexturesTimerInterval;
