@@ -134,8 +134,13 @@ void FunctionIPIntMetadataGenerator::addReturnData(const FunctionSignature& sig)
     // 0x10: stack
     // 0x11: return
 
+#if USE(JSVALUE64)
     constexpr static int NUM_UINT_GPRS = 8;
     constexpr static int NUM_UINT_FPRS = 8;
+#else
+    constexpr static int NUM_UINT_GPRS = 1;
+    constexpr static int NUM_UINT_FPRS = 1;
+#endif
     ASSERT_UNUSED(NUM_UINT_GPRS, wasmCallingConvention().jsrArgs.size() <= NUM_UINT_GPRS);
     ASSERT_UNUSED(NUM_UINT_FPRS, wasmCallingConvention().fprArgs.size() <= NUM_UINT_FPRS);
 
@@ -162,6 +167,7 @@ void FunctionIPIntMetadataGenerator::addReturnData(const FunctionSignature& sig)
     m_uINTBytecode.reverse();
     m_uINTBytecode.append(static_cast<uint8_t>(IPInt::UIntBytecode::End));
 }
+
 
 } }
 

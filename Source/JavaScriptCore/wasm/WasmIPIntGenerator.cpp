@@ -799,6 +799,7 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addTableCopy(unsigned dstTableI
 
 // Locals and Globals
 
+#if USE(JSVALUE64)
 PartialResult WARN_UNUSED_RETURN IPIntGenerator::addArguments(const TypeDefinition &signature)
 {
     auto sig = signature.as<FunctionSignature>();
@@ -844,6 +845,49 @@ PartialResult WARN_UNUSED_RETURN IPIntGenerator::addArguments(const TypeDefiniti
     m_metadata->addReturnData(*sig);
     return { };
 }
+#elif USE(JSVALUE32_64)
+PartialResult WARN_UNUSED_RETURN IPIntGenerator::addArguments(const TypeDefinition &signature)
+{
+    auto sig = signature.as<FunctionSignature>();
+    auto numArgs = sig->argumentCount();
+    m_metadata->m_numLocals += numArgs;
+    m_metadata->m_numArguments = numArgs;
+    m_metadata->m_argumINTBytecode.resize(numArgs + 1);
+
+    int numGPR = 0;
+    int numFPR = 0;
+
+    // 0x00: GPR 0/1
+    // 0x01: unused
+    // 0x02: GPR 2/3
+    // 0x03 - 0x07: unused
+    // 0x08 - 0x0b: FPR 0-3
+    // 0x0c: stack
+    // 0x0d: end
+
+    for (size_t i = 0; i < numArgs; ++i) {
+        auto arg = sig->argumentType(i);
+        if (arg.isI32() || arg.isI64()) {
+            if (numGPR < 4) {
+                m_metadata->m_argumINTBytecode[i] = numGPR;
+                numGPR += 2;
+            } else {
+                m_metadata->m_numArgumentsOnStack++;
+                m_metadata->m_argumINTBytecode[i] = 0x0c;
+            }
+        } else {
+            if (numFPR < 2)
+                m_metadata->m_argumINTBytecode[i] = 8 + numFPR++;
+            else {
+                m_metadata->m_numArgumentsOnStack++;
+                m_metadata->m_argumINTBytecode[i] = 0x0c;
+            }
+        }
+    }
+    m_metadata->m_argumINTBytecode.last() = 0x0d;
+    return { };
+}
+#endif
 
 PartialResult WARN_UNUSED_RETURN IPIntGenerator::addLocal(Type localType, uint32_t count)
 {
@@ -2631,7 +2675,8 @@ auto IPIntGenerator::endTopLevel(BlockSignature signature, const Stack& expressi
 
 // Calls
 
-void IPIntGenerator::addCallCommonData(const FunctionSignature& signature, const CallInformation& callConvention)
+#if USE(JSVALUE64)
+void IPIntGenerator::addCallCommonData(const FunctionSignature& signature)
 {
     uint16_t stackArgs = 0;
 
