@@ -70,7 +70,7 @@ static unsigned skiaNumberOfCpuPaintingThreads()
     if (!numberOfCpuPaintingThreads.has_value()) {
         numberOfCpuPaintingThreads = std::max(1, std::min(8, WTF::numberOfProcessorCores() / 2));
 
-        if (const char* numThreadsEnv = getenv("WEBKIT_SKIA_CPU_PAINTING_THREADS")) {
+        if (const char* numThreadsEnv = getenv("WEBKIT_NICOSIA_PAINTING_THREADS")) {
             auto newValue = parseInteger<unsigned>(StringView::fromLatin1(numThreadsEnv));
             if (newValue && *newValue <= 8)
                 numberOfCpuPaintingThreads = *newValue;
