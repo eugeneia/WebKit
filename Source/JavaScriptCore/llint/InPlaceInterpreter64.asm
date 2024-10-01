@@ -173,7 +173,7 @@ end
 
 # Entering IPInt
 
-# PM = location in argumINT bytecode
+# MC = location in argumINT bytecode
 # csr0 = tmp
 # csr1 = dst
 # csr2 = src
