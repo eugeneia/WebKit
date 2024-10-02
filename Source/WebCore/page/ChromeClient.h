@@ -697,6 +697,8 @@ public:
 
     virtual void getImageBufferResourceLimitsForTesting(CompletionHandler<void(std::optional<ImageBufferResourceLimits>)>&& callback) const { callback(std::nullopt); }
 
+    virtual uint64_t nativeWindowID() const { return 0; }
+
     WEBCORE_EXPORT virtual ~ChromeClient();
 
 protected:

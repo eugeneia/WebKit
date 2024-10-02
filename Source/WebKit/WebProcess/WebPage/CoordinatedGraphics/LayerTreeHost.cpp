@@ -100,7 +100,8 @@ LayerTreeHost::LayerTreeHost(WebPage& webPage, WebCore::PlatformDisplayID displa
 #if HAVE(DISPLAY_LINK)
     // FIXME: remove the displayID from ThreadedCompositor too.
     auto displayID = m_webPage.corePage()->displayID();
-    m_compositor = ThreadedCompositor::create(*this, displayID, scaledSize, scaleFactor, m_surface->shouldPaintMirrored(), damagePropagation);
+    bool nonCompositedWebGLEnabled = webPage.corePage()->settings().nonCompositedWebGLEnabled();
+    m_compositor = ThreadedCompositor::create(*this, displayID, scaledSize, scaleFactor, m_surface->shouldPaintMirrored(), damagePropagation, nonCompositedWebGLEnabled);
 #else
     m_compositor = ThreadedCompositor::create(*this, *this, displayID, scaledSize, scaleFactor, m_surface->shouldPaintMirrored(), damagePropagation);
 #endif

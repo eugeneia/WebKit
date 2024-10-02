@@ -59,9 +59,9 @@ static constexpr unsigned c_defaultRefreshRate = 60000;
 WTF_MAKE_TZONE_ALLOCATED_IMPL(ThreadedCompositor);
 
 #if HAVE(DISPLAY_LINK)
-Ref<ThreadedCompositor> ThreadedCompositor::create(Client& client, PlatformDisplayID displayID, const IntSize& viewportSize, float scaleFactor, bool flipY, DamagePropagation damagePropagation)
+Ref<ThreadedCompositor> ThreadedCompositor::create(Client& client, PlatformDisplayID displayID, const IntSize& viewportSize, float scaleFactor, bool flipY, DamagePropagation damagePropagation, bool nonCompositedWebGLEnabled)
 {
-    return adoptRef(*new ThreadedCompositor(client, displayID, viewportSize, scaleFactor, flipY, damagePropagation));
+    return adoptRef(*new ThreadedCompositor(client, displayID, viewportSize, scaleFactor, flipY, damagePropagation, nonCompositedWebGLEnabled));
 }
 #else
 Ref<ThreadedCompositor> ThreadedCompositor::create(Client& client, ThreadedDisplayRefreshMonitor::Client& displayRefreshMonitorClient, PlatformDisplayID displayID, const IntSize& viewportSize, float scaleFactor, bool flipY, DamagePropagation damagePropagation)
@@ -71,13 +71,14 @@ Ref<ThreadedCompositor> ThreadedCompositor::create(Client& client, ThreadedDispl
 #endif
 
 #if HAVE(DISPLAY_LINK)
-ThreadedCompositor::ThreadedCompositor(Client& client, PlatformDisplayID displayID, const IntSize& viewportSize, float scaleFactor, bool flipY, DamagePropagation damagePropagation)
+ThreadedCompositor::ThreadedCompositor(Client& client, PlatformDisplayID displayID, const IntSize& viewportSize, float scaleFactor, bool flipY, DamagePropagation damagePropagation, bool nonCompositedWebGLEnabled)
 #else
 ThreadedCompositor::ThreadedCompositor(Client& client, ThreadedDisplayRefreshMonitor::Client& displayRefreshMonitorClient, PlatformDisplayID displayID, const IntSize& viewportSize, float scaleFactor, bool flipY, DamagePropagation damagePropagation)
 #endif
     : m_client(client)
     , m_flipY(flipY)
     , m_damagePropagation(damagePropagation)
+    , m_nonCompositedWebGLEnabled(nonCompositedWebGLEnabled)
     , m_compositingRunLoop(makeUnique<CompositingRunLoop>([this] { renderLayerTree(); }))
 #if !HAVE(DISPLAY_LINK)
     , m_displayRefreshMonitor(ThreadedDisplayRefreshMonitor::create(displayID, displayRefreshMonitorClient, WebCore::DisplayUpdate { 0, c_defaultRefreshRate / 1000 }))
@@ -130,6 +131,11 @@ void ThreadedCompositor::createGLContext()
 {
     ASSERT(m_compositingRunLoop->isCurrent());
 
+    // If nonCompositedWebGL is enabled there will be a gl context created for the window to render WebGL. We can't
+    // create another context for the same window.
+    if (m_nonCompositedWebGLEnabled)
+        return;
+
     // GLNativeWindowType depends on the EGL implementation: reinterpret_cast works
     // for pointers (only if they are 64-bit wide and not for other cases), and static_cast for
     // numeric types (and when needed they get extended to 64-bit) but not for pointers. Using
@@ -151,6 +157,15 @@ void ThreadedCompositor::invalidate()
     m_displayRefreshMonitor->invalidate();
 #endif
     m_compositingRunLoop->performTaskSync([this, protectedThis = Ref { *this }] {
+        if (m_nonCompositedWebGLEnabled) {
+            // We don't have glcontext or assets, but we need the call to didDestroyGLContext() so
+            // finalize() is called on the AcceleraredSurface and the compositor window is
+            // released.
+            m_client.didDestroyGLContext();
+            m_scene = nullptr;
+            return;
+        }
+
         if (!m_context || !m_context->makeContextCurrent())
             return;
 
@@ -222,11 +237,35 @@ void ThreadedCompositor::forceRepaint()
     // in a way that doesn't starve out the underlying graphics buffers.
 }
 
+void ThreadedCompositor::renderNonCompositedWebGL()
+{
+    m_client.willRenderFrame();
+
+    // Retrieve the scene attributes in a thread-safe manner.
+    Vector<RefPtr<Nicosia::Scene>> states;
+    uint32_t compositionRequestID;
+
+    {
+        Locker locker { m_attributes.lock };
+        states = WTFMove(m_attributes.states);
+        compositionRequestID = m_attributes.compositionRequestID;
+    }
+
+    m_scene->applyStateChangesAndNotifyVideoPosition(states);
+
+    m_client.didRenderFrame(compositionRequestID, WebCore::Damage::invalid());
+}
+
 void ThreadedCompositor::renderLayerTree()
 {
 #if PLATFORM(GTK) || PLATFORM(WPE)
     TraceScope traceScope(RenderLayerTreeStart, RenderLayerTreeEnd);
 #endif
+
+    if (m_nonCompositedWebGLEnabled) {
+        renderNonCompositedWebGL();
+        return;
+    }
 
     if (!m_scene || !m_scene->isActive())
         return;

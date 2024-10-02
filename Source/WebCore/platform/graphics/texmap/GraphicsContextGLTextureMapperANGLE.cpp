@@ -60,8 +60,25 @@
 
 namespace WebCore {
 
+static GCEGLSurface s_windowSurfaceObj { nullptr };
+static int s_windowSurfaceUsers { 0 };
+
 GraphicsContextGLANGLE::~GraphicsContextGLANGLE()
 {
+    if (m_rendersToHostWindow) {
+        // When rendering to the host window, destroy the context only, not the surface, as it's the static one.
+        if (m_contextObj) {
+            EGL_MakeCurrent(m_displayObj, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+            EGL_DestroyContext(m_displayObj, m_contextObj);
+            s_windowSurfaceUsers--;
+            if (!s_windowSurfaceUsers) {
+                EGL_DestroySurface(m_displayObj, s_windowSurfaceObj);
+                s_windowSurfaceObj = nullptr;
+            }
+        }
+        return;
+    }
+
     if (!makeContextCurrent())
         return;
 
@@ -151,6 +168,11 @@ GraphicsContextGLTextureMapperANGLE::GraphicsContextGLTextureMapperANGLE(Graphic
 
 GraphicsContextGLTextureMapperANGLE::~GraphicsContextGLTextureMapperANGLE()
 {
+    if (m_rendersToHostWindow) {
+        // Nothing to destroy in this case.
+        return;
+    }
+
     if (!makeContextCurrent())
         return;
 
@@ -185,6 +207,7 @@ RefPtr<VideoFrame> GraphicsContextGLTextureMapperANGLE::surfaceBufferToVideoFram
 bool GraphicsContextGLTextureMapperANGLE::platformInitializeContext()
 {
     m_isForWebGL2 = contextAttributes().isWebGL2;
+    m_rendersToHostWindow = contextAttributes().renderTarget == GraphicsContextGLRenderTarget::HostWindow;
 
     auto& sharedDisplay = PlatformDisplay::sharedDisplay();
     m_displayObj = sharedDisplay.angleEGLDisplay();
@@ -196,17 +219,23 @@ bool GraphicsContextGLTextureMapperANGLE::platformInitializeContext()
 
     bool isSurfacelessContextSupported = GLContext::isExtensionSupported(displayExtensions, "EGL_KHR_surfaceless_context");
 
+    EGLint surfaceType;
+    if (m_rendersToHostWindow)
+        surfaceType = EGL_WINDOW_BIT;
+    else
+        surfaceType = !isSurfacelessContextSupported || sharedDisplay.type() == PlatformDisplay::Type::Surfaceless ? EGL_PBUFFER_BIT : EGL_WINDOW_BIT;
+
     EGLint configAttributes[] = {
         EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
 #if USE(NICOSIA)
-        EGL_SURFACE_TYPE, !isSurfacelessContextSupported || sharedDisplay.type() == PlatformDisplay::Type::Surfaceless ? EGL_PBUFFER_BIT : EGL_WINDOW_BIT,
+        EGL_SURFACE_TYPE, surfaceType,
 #endif
         EGL_RED_SIZE, 8,
         EGL_GREEN_SIZE, 8,
         EGL_BLUE_SIZE, 8,
         EGL_ALPHA_SIZE, 8,
-        EGL_DEPTH_SIZE, 0,
-        EGL_STENCIL_SIZE, 0,
+        EGL_DEPTH_SIZE, m_rendersToHostWindow ? 16 : 0,
+        EGL_STENCIL_SIZE, m_rendersToHostWindow ? 8 : 0,
         EGL_NONE
     };
     EGLint numberConfigsReturned = 0;
@@ -217,7 +246,17 @@ bool GraphicsContextGLTextureMapperANGLE::platformInitializeContext()
     }
     LOG(WebGL, "Got EGLConfig");
 
-    if (!isSurfacelessContextSupported) {
+    if (m_rendersToHostWindow) {
+        if (!s_windowSurfaceObj) {
+            s_windowSurfaceObj = EGL_CreateWindowSurface(m_displayObj, m_configObj, reinterpret_cast<EGLNativeWindowType>(contextAttributes().nativeWindowID), nullptr);
+            if (s_windowSurfaceObj == EGL_NO_SURFACE) {
+                LOG(WebGL, "Failed to create a window surface");
+                return false;
+            }
+        }
+        m_surfaceObj = s_windowSurfaceObj;
+        s_windowSurfaceUsers++;
+    } else if (!isSurfacelessContextSupported) {
         static const int pbufferAttributes[] = { EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE };
         m_surfaceObj = EGL_CreatePbufferSurface(m_displayObj, m_configObj, pbufferAttributes);
         if (m_surfaceObj == EGL_NO_SURFACE) {
@@ -289,6 +328,9 @@ bool GraphicsContextGLTextureMapperANGLE::platformInitialize()
     m_texmapLayer = makeUnique<TextureMapperGCGLPlatformLayer>(*this);
     m_layerContentsDisplayDelegate = PlatformLayerDisplayDelegate::create(m_texmapLayer.get());
 #endif
+
+    if (m_rendersToHostWindow)
+        return true;
 
     GLenum textureTarget = drawingBufferTextureTarget();
 #if USE(NICOSIA)
@@ -362,6 +404,11 @@ void GraphicsContextGLTextureMapperANGLE::prepareForDisplay()
 {
     if (!makeContextCurrent())
         return;
+
+    if (m_rendersToHostWindow) {
+        EGL_SwapBuffers(m_displayObj, m_surfaceObj);
+        return;
+    }
 
     prepareTexture();
     swapCompositorTexture();

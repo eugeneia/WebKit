@@ -1156,4 +1156,22 @@ void TextureMapperLayer::recordDamage(const FloatRect& rect, const Transformatio
     m_visitor->recordDamage(transformedRect);
 }
 
+void TextureMapperLayer::computeTransformsAndNotifyVideoPosition()
+{
+    ComputeTransformData data;
+    computeTransformsRecursive(data);
+
+    notifyVideoPositionRecursive();
+}
+
+void TextureMapperLayer::notifyVideoPositionRecursive()
+{
+    if (m_contentsLayer) {
+        m_contentsLayer->notifyPositionToHolePunchClient(m_state.contentsRect, m_layerTransforms.combined);
+    }
+
+    for (auto* child : m_children)
+        child->notifyVideoPositionRecursive();
+}
+
 }

@@ -130,6 +130,8 @@ public:
     ALWAYS_INLINE void addDamage(const Damage&);
     ALWAYS_INLINE void addDamage(const FloatRect&);
 
+    void computeTransformsAndNotifyVideoPosition();
+    void notifyVideoPositionRecursive();
 private:
     TextureMapperLayer& rootLayer() const
     {

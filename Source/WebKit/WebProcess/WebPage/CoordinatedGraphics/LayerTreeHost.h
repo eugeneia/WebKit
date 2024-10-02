@@ -117,6 +117,9 @@ public:
 #if PLATFORM(WPE) && USE(GBM) && ENABLE(WPE_PLATFORM)
     void preferredBufferFormatsDidChange();
 #endif
+
+    uint64_t nativeWindowID() { return m_surface->window(); }
+
 private:
 #if USE(COORDINATED_GRAPHICS)
     void layerFlushTimerFired();

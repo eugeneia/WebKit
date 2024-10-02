@@ -42,6 +42,7 @@
 #include <WebCore/NicosiaContentLayer.h>
 #include <WebCore/NicosiaImageBacking.h>
 #include <WebCore/Page.h>
+#include <WebCore/Settings.h>
 #include <WebCore/PlatformDisplay.h>
 #include <wtf/MemoryPressureHandler.h>
 #include <wtf/NumberOfCores.h>
@@ -89,6 +90,7 @@ CompositingCoordinator::CompositingCoordinator(WebPage& page, CompositingCoordin
 #if USE(CAIRO)
     , m_paintingEngine(Nicosia::PaintingEngine::create())
 #endif
+    , m_nonCompositedWebGLEnabled(m_page.corePage()->settings().nonCompositedWebGLEnabled())
 {
 #if USE(SKIA)
     if (ProcessCapabilities::canUseAcceleratedBuffers() && PlatformDisplay::sharedDisplay().skiaGLContext())

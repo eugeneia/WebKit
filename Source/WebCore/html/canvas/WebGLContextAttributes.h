@@ -42,6 +42,8 @@ using WebGLPowerPreference = GraphicsContextGLPowerPreference;
 
 using WebGLContextSimulatedCreationFailure = GraphicsContextGLSimulatedCreationFailure;
 
+using WebGLContextRenderTarget = GraphicsContextGLRenderTarget;
+
 struct WebGLContextAttributes {
     bool alpha { true };
     bool depth { true };
@@ -57,6 +59,10 @@ struct WebGLContextAttributes {
 #endif
     using SimulatedCreationFailure = WebGLContextSimulatedCreationFailure;
     SimulatedCreationFailure failContextCreationForTesting { SimulatedCreationFailure::None };
+    using RenderTarget = WebGLContextRenderTarget;
+    RenderTarget renderTarget { RenderTarget::Offscreen };
+    using NativeWindowID = uint64_t;
+    NativeWindowID nativeWindowID { 0 };
 };
 
 } // namespace WebCore

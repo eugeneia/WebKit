@@ -102,6 +102,7 @@ private:
     WorkerPool* skiaUnacceleratedThreadedRenderingPool() const override { return m_skiaUnacceleratedThreadedRenderingPool.get(); }
 #endif
     RefPtr<Nicosia::ImageBackingStore> imageBackingStore(uint64_t, Function<RefPtr<Nicosia::Buffer>()>) override;
+    bool nonCompositedWebGLEnabled() const override { return m_nonCompositedWebGLEnabled; }
 
     // GraphicsLayerFactory
     Ref<WebCore::GraphicsLayer> createGraphicsLayer(WebCore::GraphicsLayer::Type, WebCore::GraphicsLayerClient&) override;
@@ -147,6 +148,7 @@ private:
 
     double m_lastAnimationServiceTime { 0 };
     bool m_forceFrameSync { false };
+    bool m_nonCompositedWebGLEnabled { false };
 };
 
 }

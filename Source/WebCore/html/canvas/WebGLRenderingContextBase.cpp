@@ -442,6 +442,9 @@ static GraphicsContextGLAttributes resolveGraphicsContextGLAttributes(const WebG
     glAttributes.xrCompatible = attributes.xrCompatible;
 #endif
     glAttributes.failContextCreationForTesting = attributes.failContextCreationForTesting;
+    glAttributes.renderTarget = attributes.renderTarget;
+    glAttributes.nativeWindowID = attributes.nativeWindowID;
+
     return glAttributes;
 }
 
@@ -460,6 +463,11 @@ std::unique_ptr<WebGLRenderingContextBase> WebGLRenderingContextBase::create(Can
 #endif
     if (scriptExecutionContext->settingsValues().forceWebGLUsesLowPower)
         attributes.powerPreference = GraphicsContextGLPowerPreference::LowPower;
+
+    if (scriptExecutionContext->settingsValues().nonCompositedWebGLEnabled) {
+        attributes.renderTarget = GraphicsContextGLRenderTarget::HostWindow;
+        attributes.nativeWindowID = graphicsClient->nativeWindowID();
+    }
 
     const bool isWebGL2 = type == WebGLVersion::WebGL2;
     RefPtr<GraphicsContextGL> context;

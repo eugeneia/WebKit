@@ -235,6 +235,8 @@ void DrawingAreaCoordinatedGraphics::updatePreferences(const WebPreferencesStore
         settings.setAsyncFrameScrollingEnabled(false);
         settings.setAsyncOverflowScrollingEnabled(false);
     }
+
+    settings.setAllowWebGLInWorkers(!store.getBoolValueForKey(WebPreferencesKey::nonCompositedWebGLEnabledKey()));
 }
 
 void DrawingAreaCoordinatedGraphics::mainFrameContentSizeChanged(WebCore::FrameIdentifier, const IntSize& size)
@@ -794,5 +796,10 @@ void DrawingAreaCoordinatedGraphics::preferredBufferFormatsDidChange()
         m_layerTreeHost->preferredBufferFormatsDidChange();
 }
 #endif
+
+uint64_t DrawingAreaCoordinatedGraphics::nativeWindowID() const
+{
+    return m_layerTreeHost ? m_layerTreeHost->nativeWindowID() : 0;
+}
 
 } // namespace WebKit

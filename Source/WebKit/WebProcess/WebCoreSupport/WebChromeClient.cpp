@@ -1938,4 +1938,9 @@ void WebChromeClient::getImageBufferResourceLimitsForTesting(CompletionHandler<v
 }
 #endif
 
+uint64_t WebChromeClient::nativeWindowID() const
+{
+    return protectedPage()->drawingArea()->nativeWindowID();
+}
+
 } // namespace WebKit

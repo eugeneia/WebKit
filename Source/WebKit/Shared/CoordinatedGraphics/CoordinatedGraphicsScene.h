@@ -60,6 +60,7 @@ public:
     virtual ~CoordinatedGraphicsScene();
 
     void applyStateChanges(const Vector<RefPtr<Nicosia::Scene>>&);
+    void applyStateChangesAndNotifyVideoPosition(const Vector<RefPtr<Nicosia::Scene>>&);
     void paintToCurrentGLContext(const WebCore::TransformationMatrix&, const WebCore::FloatRect&, bool flipY = false);
     void updateSceneState();
     void detach();

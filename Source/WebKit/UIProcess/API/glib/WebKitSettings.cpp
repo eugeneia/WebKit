@@ -195,6 +195,7 @@ enum {
     PROP_ENABLE_SERVICE_WORKER,
     PROP_ENABLE_ICE_CANDIDATE_FILTERING,
     PROP_WEBRTC_UDP_PORTS_RANGE,
+    PROP_ENABLE_NON_COMPOSITED_WEBGL,
     N_PROPERTIES,
 };
 
@@ -450,6 +451,9 @@ ALLOW_DEPRECATED_DECLARATIONS_BEGIN
     case PROP_WEBRTC_UDP_PORTS_RANGE:
         webkit_settings_set_webrtc_udp_ports_range(settings, g_value_get_string(value));
         break;
+    case PROP_ENABLE_NON_COMPOSITED_WEBGL:
+        webkit_settings_set_enable_non_composited_webgl(settings, g_value_get_boolean(value));
+        break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID(object, propId, paramSpec);
         break;
@@ -684,6 +688,9 @@ ALLOW_DEPRECATED_DECLARATIONS_BEGIN
         break;
     case PROP_WEBRTC_UDP_PORTS_RANGE:
         g_value_set_string(value, webkit_settings_get_webrtc_udp_ports_range(settings));
+        break;
+    case PROP_ENABLE_NON_COMPOSITED_WEBGL:
+        g_value_set_boolean(value, webkit_settings_get_enable_non_composited_webgl(settings));
         break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID(object, propId, paramSpec);
@@ -1844,6 +1851,19 @@ static void webkit_settings_class_init(WebKitSettingsClass* klass)
         _("WebRTC UDP ports range"),
         _("WebRTC UDP ports range, the format is min-port:max-port"),
         nullptr, // A null string forces the default value.
+        readWriteConstructParamFlags);
+
+    /**
+    * WebKitSettings:enable-non-composited-webgl:
+    *
+    * Enable or disable support for non composited WebGL. This feature allows improving
+    * the performance of WebGL-only pages by removing the composition stage.
+    */
+    sObjProperties[PROP_ENABLE_NON_COMPOSITED_WEBGL] = g_param_spec_boolean(
+        "enable-non-composited-webgl",
+        _("Enable non composited WebGL"),
+        _("Whether non composited WebGL should be enabled"),
+        FALSE,
         readWriteConstructParamFlags);
 
     g_object_class_install_properties(gObjectClass, N_PROPERTIES, sObjProperties);
@@ -4780,16 +4800,39 @@ void webkit_settings_set_enable_ice_candidate_filtering(WebKitSettings* settings
     g_object_notify(G_OBJECT(settings), "enable-ice-candidate-filtering");
 }
 
+/**
+ * webkit_settings_get_enable_non_composited_webgl:
+ * @settings: a #WebKitSettings
+ *
+ * Get the #WebKitSettings:enable-non-composited-webgl property.
+ *
+ * Returns: %TRUE If non composited WebGL support is enabled or %FALSE otherwise.
+ */
 gboolean webkit_settings_get_enable_non_composited_webgl(WebKitSettings* settings)
 {
     g_return_val_if_fail(WEBKIT_IS_SETTINGS(settings), FALSE);
 
-    return FALSE;
+    return settings->priv->preferences->nonCompositedWebGLEnabled();
 }
 
+/**
+ * webkit_settings_set_enable_non_composited_webgl:
+ * @settings: a #WebKitSettings
+ * @enabled: Value to be set
+ *
+ * Set the #WebKitSettings:enable-non-composited-webgl property.
+ */
 void webkit_settings_set_enable_non_composited_webgl(WebKitSettings* settings, gboolean enabled)
 {
     g_return_if_fail(WEBKIT_IS_SETTINGS(settings));
+
+    WebKitSettingsPrivate* priv = settings->priv;
+    bool currentValue = priv->preferences->nonCompositedWebGLEnabled();
+    if (currentValue == enabled)
+        return;
+
+    priv->preferences->setNonCompositedWebGLEnabled(enabled);
+    g_object_notify(G_OBJECT(settings), "enable-non-composited-webgl");
 }
 
 /**

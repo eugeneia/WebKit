@@ -48,6 +48,12 @@ using namespace WebCore;
 
 void GCGLANGLELayer::swapBuffersIfNeeded()
 {
+    if (m_context.contextAttributes().renderTarget == GraphicsContextGLRenderTarget::HostWindow) {
+        // SwapBuffers is called from inside GraphicsContextGLTextureMapperANGLE::prepareForDisplay(),
+        // nothing to do here.
+        return;
+    }
+
     auto& proxy = m_contentLayer->proxy();
 
 #if USE(ANGLE_GBM)

@@ -68,6 +68,7 @@ public:
 #endif
 
     virtual RefPtr<Nicosia::ImageBackingStore> imageBackingStore(uint64_t, Function<RefPtr<Nicosia::Buffer>()>) = 0;
+    virtual bool nonCompositedWebGLEnabled() const = 0;
 };
 
 class WEBCORE_EXPORT CoordinatedGraphicsLayer : public GraphicsLayer {
@@ -235,6 +236,8 @@ private:
 
     void updateAnimationScaleFactor();
     void updateAnimationOrTransformScaleFactor();
+
+    bool nonCompositedWebGLEnabled() const { return m_coordinator && m_coordinator->nonCompositedWebGLEnabled(); }
 
     Nicosia::PlatformLayer::LayerID m_id;
     GraphicsLayerTransform m_layerTransform;

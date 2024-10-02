@@ -109,6 +109,10 @@ bool GraphicsContextGLANGLE::initialize()
     if (m_isForWebGL2)
         GL_Enable(GraphicsContextGL::PRIMITIVE_RESTART_FIXED_INDEX);
 
+    // Nothing else to do on nonCompositedWebGL mode.
+    if (m_rendersToHostWindow)
+        return platformInitialize();
+
     // Create the texture that will be used for the framebuffer.
     GLenum textureTarget = drawingBufferTextureTarget();
 
@@ -694,7 +698,7 @@ void GraphicsContextGLANGLE::reshape(int width, int height)
     ScopedGLCapability scopedDither(GL_DITHER, GL_FALSE);
     ScopedBufferBinding scopedPixelUnpackBufferReset(GL_PIXEL_UNPACK_BUFFER, 0, m_isForWebGL2);
 
-    bool mustRestoreFBO = reshapeFBOs(IntSize(width, height));
+    bool mustRestoreFBO = m_rendersToHostWindow ? false : reshapeFBOs(IntSize(width, height));
     auto attrs = contextAttributes();
 
     // Initialize renderbuffers to 0.

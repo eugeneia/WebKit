@@ -104,6 +104,7 @@ public:
     };
 
     void setHolePunchClient(std::unique_ptr<HolePunchClient>&& client) { m_holePunchClient = WTFMove(client); }
+    void notifyPositionToHolePunchClient(const FloatRect&, const TransformationMatrix&) final;
 
 #if PLATFORM(GTK) || PLATFORM(WPE)
     void setFence(std::unique_ptr<GLFence>&& fence) { m_fence = WTFMove(fence); }

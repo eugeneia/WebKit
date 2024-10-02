@@ -43,6 +43,11 @@ enum class GraphicsContextGLSimulatedCreationFailure : uint8_t {
     FailPlatformContextCreation
 };
 
+enum class GraphicsContextGLRenderTarget {
+    Offscreen,
+    HostWindow
+};
+
 #if PLATFORM(MAC)
 using PlatformGPUID = uint64_t;
 #endif
@@ -64,6 +69,10 @@ struct GraphicsContextGLAttributes {
 #endif
     using SimulatedCreationFailure = GraphicsContextGLSimulatedCreationFailure;
     SimulatedCreationFailure failContextCreationForTesting { SimulatedCreationFailure::None };
+    using RenderTarget = GraphicsContextGLRenderTarget;
+    RenderTarget renderTarget { RenderTarget::Offscreen };
+    using NativeWindowID = uint64_t;
+    NativeWindowID nativeWindowID { 0 };
 };
 }
 

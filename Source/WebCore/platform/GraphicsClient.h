@@ -60,6 +60,8 @@ public:
     virtual RefPtr<WebCore::WebGPU::GPU> createGPUForWebGPU() const = 0;
 #endif
 
+    virtual uint64_t nativeWindowID() const { return 0; }
+
 private:
     // Called by passing GraphicsClient into ImageBuffer functions.
     virtual RefPtr<ImageBuffer> createImageBuffer(const FloatSize&, RenderingPurpose, float resolutionScale, const DestinationColorSpace&, ImageBufferPixelFormat, OptionSet<ImageBufferOptions>) const = 0;

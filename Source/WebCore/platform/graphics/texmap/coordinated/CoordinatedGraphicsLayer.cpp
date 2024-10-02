@@ -915,7 +915,9 @@ void CoordinatedGraphicsLayer::flushCompositingStateForThisLayerOnly()
     }
 
     // Determine image backing presence according to the composited image source.
-    if (m_compositedNativeImage) {
+    if (nonCompositedWebGLEnabled()) {
+        ASSERT(!m_nicosia.imageBacking);
+    } else if (m_compositedNativeImage) {
         ASSERT(m_compositedImage);
         auto& image = *m_compositedImage;
         uintptr_t imageID = reinterpret_cast<uintptr_t>(&image);
@@ -1430,6 +1432,9 @@ void CoordinatedGraphicsLayer::computeTransformedVisibleRect()
 
 bool CoordinatedGraphicsLayer::shouldHaveBackingStore() const
 {
+    if (nonCompositedWebGLEnabled())
+        return false;
+
     // If the CSS opacity value is 0 and there's no animation over the opacity property, the layer is invisible.
     bool isInvisibleBecauseOpacityZero = !opacity() && !m_animations.hasActiveAnimationsOfType(AnimatedProperty::Opacity);
 

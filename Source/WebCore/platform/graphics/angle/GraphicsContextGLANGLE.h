@@ -437,6 +437,7 @@ protected:
     GCGLint m_drawingBufferTextureTarget { -1 };
     GCGLErrorCodeSet m_errors;
     bool m_isForWebGL2 { false };
+    bool m_rendersToHostWindow { false };
     bool m_failNextStatusCheck { false };
     GraphicsContextGLState m_state;
 

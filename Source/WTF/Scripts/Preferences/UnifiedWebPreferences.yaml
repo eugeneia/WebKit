@@ -5049,6 +5049,19 @@ NeedsStorageAccessFromFileURLsQuirk:
     WebCore:
       default: true
 
+NonCompositedWebGLEnabled:
+  type: bool
+  status: embedder
+  humanReadableName: "NonCompositedWebGL mode"
+  condition: PLATFORM(WPE)
+  defaultValue:
+    WebKitLegacy:
+      default: false
+    WebKit:
+      default: false
+    WebCore:
+      default: false
+
 NotificationEventEnabled:
   type: bool
   status: internal

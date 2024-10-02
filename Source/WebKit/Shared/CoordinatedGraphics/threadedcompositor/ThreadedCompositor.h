@@ -72,7 +72,7 @@ public:
     };
 
 #if HAVE(DISPLAY_LINK)
-    static Ref<ThreadedCompositor> create(Client&, WebCore::PlatformDisplayID, const WebCore::IntSize&, float scaleFactor, bool flipY, DamagePropagation);
+    static Ref<ThreadedCompositor> create(Client&, WebCore::PlatformDisplayID, const WebCore::IntSize&, float scaleFactor, bool flipY, DamagePropagation, bool);
 #else
     static Ref<ThreadedCompositor> create(Client&, ThreadedDisplayRefreshMonitor::Client&, WebCore::PlatformDisplayID, const WebCore::IntSize&, float scaleFactor, bool flipY, DamagePropagation);
 #endif
@@ -102,7 +102,7 @@ public:
 
 private:
 #if HAVE(DISPLAY_LINK)
-    ThreadedCompositor(Client&, WebCore::PlatformDisplayID, const WebCore::IntSize&, float scaleFactor, bool flipY, DamagePropagation);
+    ThreadedCompositor(Client&, WebCore::PlatformDisplayID, const WebCore::IntSize&, float scaleFactor, bool flipY, DamagePropagation, bool);
 #else
     ThreadedCompositor(Client&, ThreadedDisplayRefreshMonitor::Client&, WebCore::PlatformDisplayID, const WebCore::IntSize&, float scaleFactor, bool flipY, DamagePropagation);
 #endif
@@ -112,6 +112,7 @@ private:
 
     void renderLayerTree();
     void sceneUpdateFinished();
+    void renderNonCompositedWebGL();
 
     void createGLContext();
 
@@ -127,6 +128,7 @@ private:
     bool m_flipY { false };
     DamagePropagation m_damagePropagation { DamagePropagation::None };
     unsigned m_suspendedCount { 0 };
+    bool m_nonCompositedWebGLEnabled { false };
 
     std::unique_ptr<CompositingRunLoop> m_compositingRunLoop;
 
