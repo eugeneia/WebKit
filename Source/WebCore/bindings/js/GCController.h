@@ -54,10 +54,10 @@ public:
     WEBCORE_EXPORT void deleteAllCode(JSC::DeleteAllCodeEffort);
     WEBCORE_EXPORT void deleteAllLinkedCode(JSC::DeleteAllCodeEffort);
 
+    WEBCORE_EXPORT void dumpHeap();
+
 private:
     GCController(); // Use singleton() instead.
-
-    void dumpHeap();
 
     void gcTimerFired();
     Timer m_GCTimer;
