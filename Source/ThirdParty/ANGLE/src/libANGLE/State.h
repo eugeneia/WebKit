@@ -1496,6 +1496,8 @@ class State : angle::NonCopyable
     using DirtyObjectHandler = angle::Result (State::*)(const Context *context, Command command);
     using DirtyObjectHandlerArray = std::array<DirtyObjectHandler, state::DIRTY_OBJECT_MAX>;
 
+#pragma GCC optimize push
+#pragma GCC optimize "-fdelete-null-pointer-checks"
     static constexpr DirtyObjectHandlerArray MakeDirtyObjectHandlers()
     {
         // Work around C++'s lack of array element support in designated initializers
@@ -1526,6 +1528,7 @@ class State : angle::NonCopyable
 
         return handlers;
     }
+#pragma GCC optimize pop
 
     angle::Result dirtyObjectHandler(size_t dirtyObject, const Context *context, Command command)
     {

@@ -151,6 +151,8 @@ struct hash_policy_traits : common_policy_traits<Policy> {
 
   using HashSlotFn = size_t (*)(const void* hash_fn, void* slot);
 
+#pragma GCC optimize push
+#pragma GCC optimize "-fdelete-null-pointer-checks"
   template <class Hash>
   static constexpr HashSlotFn get_hash_slot_fn() {
 // get_hash_slot_fn may return nullptr to signal that non type erased function
@@ -167,6 +169,7 @@ struct hash_policy_traits : common_policy_traits<Policy> {
 #pragma GCC diagnostic pop
 #endif
   }
+#pragma GCC optimize pop
 
   // Whether small object optimization is enabled. True by default.
   static constexpr bool soo_enabled() { return soo_enabled_impl(Rank1{}); }
