@@ -1756,12 +1756,12 @@ JSC_DEFINE_CUSTOM_GETTER(customGetValue2, (JSGlobalObject* globalObject, Encoded
 
 JSC_DEFINE_CUSTOM_GETTER(customGetAccessorGlobalObject, (JSGlobalObject* globalObject, EncodedJSValue, PropertyName))
 {
-    return JSValue::encode(globalObject);
+    return JSValue::encode(globalObject->globalThis());
 }
 
 JSC_DEFINE_CUSTOM_GETTER(customGetValueGlobalObject, (JSGlobalObject* globalObject, EncodedJSValue, PropertyName))
 {
-    return JSValue::encode(globalObject);
+    return JSValue::encode(globalObject->globalThis());
 }
 
 JSC_DEFINE_CUSTOM_SETTER(customSetAccessor, (JSGlobalObject* globalObject, EncodedJSValue thisObject, EncodedJSValue encodedValue, PropertyName))
@@ -1791,7 +1791,7 @@ JSC_DEFINE_CUSTOM_SETTER(customSetAccessorGlobalObject, (JSGlobalObject* globalO
 
     JSObject* object = asObject(value);
     PutPropertySlot slot(object);
-    object->put(object, globalObject, Identifier::fromString(vm, "result"_s), globalObject, slot);
+    object->put(object, globalObject, Identifier::fromString(vm, "result"_s), globalObject->globalThis(), slot);
 
     return true;
 }
@@ -1827,7 +1827,7 @@ JSC_DEFINE_CUSTOM_SETTER(customSetValueGlobalObject, (JSGlobalObject* globalObje
 
     JSObject* object = asObject(value);
     PutPropertySlot slot(object);
-    object->put(object, globalObject, Identifier::fromString(vm, "result"_s), globalObject, slot);
+    object->put(object, globalObject, Identifier::fromString(vm, "result"_s), globalObject->globalThis(), slot);
 
     return true;
 }
