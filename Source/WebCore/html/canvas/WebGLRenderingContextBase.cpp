@@ -531,6 +531,7 @@ void WebGLRenderingContextBase::initializeNewContext(Ref<GraphicsContextGL> cont
     updateActiveOrdinal();
     if (!wasActive)
         addActiveContext(*this);
+    addActivityStateChangeObserverIfNecessary();
     initializeContextState();
     initializeDefaultObjects();
     // Next calls will receive the context lost callback.
@@ -626,6 +627,35 @@ void WebGLRenderingContextBase::initializeDefaultObjects()
     m_defaultFramebuffer = WebGLDefaultFramebuffer::create(*this, clampedCanvasSize());
 }
 
+void WebGLRenderingContextBase::addActivityStateChangeObserverIfNecessary()
+{
+    auto* canvas = htmlCanvas();
+    if (!canvas)
+        return;
+
+    if (!canvas->scriptExecutionContext()->settingsValues().nonCompositedWebGLEnabled)
+        return;
+
+    RefPtr page = canvas->document().page();
+    if (!page)
+        return;
+
+    page->addActivityStateChangeObserver(*this);
+}
+
+void WebGLRenderingContextBase::removeActivityStateChangeObserver()
+{
+    auto* canvas = htmlCanvas();
+    if (!canvas)
+        return;
+
+    if (!canvas->scriptExecutionContext()->settingsValues().nonCompositedWebGLEnabled)
+        return;
+
+    if (RefPtr page = canvas ? canvas->document().page() : nullptr)
+        page->removeActivityStateChangeObserver(*this);
+}
+
 void WebGLRenderingContextBase::addCompressedTextureFormat(GCGLenum format)
 {
     if (!m_compressedTextureFormats.contains(format))
@@ -667,6 +697,8 @@ WebGLRenderingContextBase::~WebGLRenderingContextBase()
 
 void WebGLRenderingContextBase::destroyGraphicsContextGL()
 {
+    removeActivityStateChangeObserver();
+
     if (m_context) {
         m_context->setClient(nullptr);
         m_context = nullptr;
@@ -5500,6 +5532,24 @@ void WebGLRenderingContextBase::loseExtensions(LostContextMode mode)
 
     if (mode == LostContextMode::RealLostContext)
         loseExtension(WTFMove(m_webglLoseContext));
+}
+
+void WebGLRenderingContextBase::activityStateDidChange(OptionSet<ActivityState> oldActivityState, OptionSet<ActivityState> newActivityState)
+{
+    if (!m_context)
+        return;
+
+    auto changed = oldActivityState ^ newActivityState;
+    if (((changed & ActivityState::IsInWindow) && !(newActivityState & ActivityState::IsInWindow)) ||
+        ((changed & ActivityState::IsVisible) && !(newActivityState & ActivityState::IsVisible))) {
+        if (m_scissorEnabled)
+            m_context->disable(GraphicsContextGL::SCISSOR_TEST);
+        m_context->clearColor(0, 0, 0, 0);
+        m_context->clear(GraphicsContextGL::COLOR_BUFFER_BIT);
+        m_context->prepareForDisplay();
+        if (m_scissorEnabled)
+            m_context->enable(GraphicsContextGL::SCISSOR_TEST);
+    }
 }
 
 void WebGLRenderingContextBase::forceContextLost()

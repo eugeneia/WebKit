@@ -6719,6 +6719,11 @@ void HTMLMediaElement::suspend(ReasonForSuspension reason)
             m_mediaSession->addBehaviorRestriction(MediaElementSession::RequirePageConsentToResumeMedia);
         break;
     case ReasonForSuspension::PageWillBeSuspended:
+        stopWithoutDestroyingMediaPlayer();
+        setBufferingPolicy(BufferingPolicy::MakeResourcesPurgeable);
+        if (m_player)
+            m_player->setPageIsSuspended(true);
+        break;
     case ReasonForSuspension::JavaScriptDebuggerPaused:
     case ReasonForSuspension::WillDeferLoading:
         // Do nothing, we don't pause media playback in these cases.
@@ -6729,6 +6734,9 @@ void HTMLMediaElement::suspend(ReasonForSuspension reason)
 void HTMLMediaElement::resume()
 {
     ALWAYS_LOG(LOGIDENTIFIER);
+
+    if (m_player)
+        m_player->setPageIsSuspended(false);
 
     setInActiveDocument(true);
 

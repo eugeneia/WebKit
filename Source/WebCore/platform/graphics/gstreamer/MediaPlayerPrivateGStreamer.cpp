@@ -226,6 +226,9 @@ MediaPlayerPrivateGStreamer::MediaPlayerPrivateGStreamer(MediaPlayer* player)
 
 MediaPlayerPrivateGStreamer::~MediaPlayerPrivateGStreamer()
 {
+    if (m_gstreamerHolePunchHost)
+        m_gstreamerHolePunchHost->playerPrivateWillBeDestroyed();
+
     tearDown(true);
 }
 
@@ -4222,27 +4225,12 @@ GstElement* MediaPlayerPrivateGStreamer::createVideoSinkGL()
 
 class GStreamerHolePunchClient : public TextureMapperPlatformLayerBuffer::HolePunchClient {
 public:
-    GStreamerHolePunchClient(GRefPtr<GstElement>&& videoSink, RefPtr<GStreamerQuirksManager>&& quirksManagerForTesting)
-        : m_videoSink(WTFMove(videoSink))
-        , m_quirksManagerForTesting(WTFMove(quirksManagerForTesting))
+    GStreamerHolePunchClient(RefPtr<MediaPlayerPrivateGStreamer::GStreamerHolePunchHost>&& host)
+        : m_host(WTFMove(host))
     { };
-    void setVideoRectangle(const IntRect& rect) final
-    {
-        if (!m_videoSink)
-            return;
-
-        if (m_quirksManagerForTesting) {
-            m_quirksManagerForTesting->setHolePunchVideoRectangle(m_videoSink.get(), rect);
-            return;
-        }
-
-        auto& quirksManager = GStreamerQuirksManager::singleton();
-        quirksManager.setHolePunchVideoRectangle(m_videoSink.get(), rect);
-    }
-
+    void setVideoRectangle(const IntRect& rect) final { m_host->setVideoRectangle(rect); }
 private:
-    GRefPtr<GstElement> m_videoSink;
-    RefPtr<GStreamerQuirksManager> m_quirksManagerForTesting;
+    RefPtr<MediaPlayerPrivateGStreamer::GStreamerHolePunchHost> m_host;
 };
 
 bool MediaPlayerPrivateGStreamer::isHolePunchRenderingEnabled() const
@@ -4277,12 +4265,15 @@ GstElement* MediaPlayerPrivateGStreamer::createHolePunchVideoSink()
 
 void MediaPlayerPrivateGStreamer::pushNextHolePunchBuffer()
 {
+    if (!m_gstreamerHolePunchHost)
+        m_gstreamerHolePunchHost = GStreamerHolePunchHost::create(*this);
+
     auto proxyOperation =
         [this](TextureMapperPlatformLayerProxyGL& proxy)
         {
             Locker locker { proxy.lock() };
             std::unique_ptr<TextureMapperPlatformLayerBuffer> layerBuffer = makeUnique<TextureMapperPlatformLayerBuffer>(0, m_size, TextureMapperFlags::ShouldNotBlend, GL_DONT_CARE);
-            std::unique_ptr<GStreamerHolePunchClient> holePunchClient = makeUnique<GStreamerHolePunchClient>(m_videoSink.get(), RefPtr { m_quirksManagerForTesting });
+            std::unique_ptr<GStreamerHolePunchClient> holePunchClient = makeUnique<GStreamerHolePunchClient>(m_gstreamerHolePunchHost.copyRef());
             layerBuffer->setHolePunchClient(WTFMove(holePunchClient));
             proxy.pushNextBuffer(WTFMove(layerBuffer));
         };
@@ -4695,6 +4686,71 @@ String MediaPlayerPrivateGStreamer::codecForStreamId(const String& streamId)
 
     return m_codecs.get(streamId);
 }
+
+void MediaPlayerPrivateGStreamer::setVideoRectangle(const IntRect& rect)
+{
+    Locker locker { m_holePunchLock };
+
+    if (!m_visible || m_suspended)
+        return;
+
+    if (m_quirksManagerForTesting) {
+        m_quirksManagerForTesting->setHolePunchVideoRectangle(m_videoSink.get(), rect);
+        return;
+    }
+
+    auto& quirksManager = GStreamerQuirksManager::singleton();
+    quirksManager.setHolePunchVideoRectangle(m_videoSink.get(), rect);
+}
+
+void MediaPlayerPrivateGStreamer::setPageIsVisible(bool visible)
+{
+    if (m_visible == visible)
+        return;
+
+    if (!isHolePunchRenderingEnabled()) {
+        m_visible = visible;
+        return;
+    }
+
+    Locker locker { m_holePunchLock };
+    m_visible = visible;
+
+    if (!m_visible) {
+        if (m_quirksManagerForTesting) {
+            m_quirksManagerForTesting->setHolePunchVideoRectangle(m_videoSink.get(), IntRect());
+            return;
+        }
+
+        auto& quirksManager = GStreamerQuirksManager::singleton();
+        quirksManager.setHolePunchVideoRectangle(m_videoSink.get(), IntRect());
+    }
+}
+
+void MediaPlayerPrivateGStreamer::setPageIsSuspended(bool suspended)
+{
+    if (m_suspended == suspended)
+        return;
+
+    if (!isHolePunchRenderingEnabled()) {
+        m_suspended = suspended;
+        return;
+    }
+
+    Locker locker { m_holePunchLock };
+    m_suspended = suspended;
+
+    if (m_suspended) {
+        if (m_quirksManagerForTesting) {
+            m_quirksManagerForTesting->setHolePunchVideoRectangle(m_videoSink.get(), IntRect());
+            return;
+        }
+
+        auto& quirksManager = GStreamerQuirksManager::singleton();
+        quirksManager.setHolePunchVideoRectangle(m_videoSink.get(), IntRect());
+    }
+}
+
 
 #undef GST_CAT_DEFAULT
 

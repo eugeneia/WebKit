@@ -164,7 +164,8 @@ public:
     void setMuted(bool) final;
     MediaPlayer::NetworkState networkState() const final;
     MediaPlayer::ReadyState readyState() const final;
-    void setPageIsVisible(bool visible) final { m_visible = visible; }
+    void setPageIsVisible(bool visible) final;
+    void setPageIsSuspended(bool suspended) final;
     void setVisibleInViewport(bool isVisible) final;
     void setPresentationSize(const IntSize&) final;
     MediaTime duration() const override;
@@ -257,6 +258,35 @@ public:
             return nullptr;
         return m_quirkStates.get(owner);
     }
+
+    class GStreamerHolePunchHost : public ThreadSafeRefCounted<GStreamerHolePunchHost> {
+    public:
+        static Ref<GStreamerHolePunchHost> create(MediaPlayerPrivateGStreamer& playerPrivate)
+        {
+            return adoptRef(*new GStreamerHolePunchHost(playerPrivate));
+        }
+
+        void setVideoRectangle(const IntRect& rect)
+        {
+            Locker locker { m_playerLock };
+            if (m_playerPrivate)
+                m_playerPrivate->setVideoRectangle(rect);
+        }
+
+        void playerPrivateWillBeDestroyed()
+        {
+            Locker locker { m_playerLock };
+            m_playerPrivate = nullptr;
+        }
+    private:
+        explicit GStreamerHolePunchHost(MediaPlayerPrivateGStreamer& playerPrivate)
+            : m_playerPrivate(&playerPrivate)
+        { }
+
+        MediaPlayerPrivateGStreamer* m_playerPrivate;
+        Lock m_playerLock;
+    };
+    void setVideoRectangle(const IntRect& rect);
 
 protected:
     enum MainThreadNotification {
@@ -606,6 +636,7 @@ private:
 
     bool m_isMuted { false };
     bool m_visible { false };
+    bool m_suspended { false };
 
     // playbin3 only:
     bool m_waitingForStreamsSelectedEvent { true };
@@ -683,6 +714,9 @@ private:
 
     RefPtr<GStreamerQuirksManager> m_quirksManagerForTesting;
     HashMap<const GStreamerQuirk*, std::unique_ptr<GStreamerQuirkBase::GStreamerQuirkState>> m_quirkStates;
+
+    RefPtr<GStreamerHolePunchHost> m_gstreamerHolePunchHost;
+    Lock m_holePunchLock;
 };
 
 }

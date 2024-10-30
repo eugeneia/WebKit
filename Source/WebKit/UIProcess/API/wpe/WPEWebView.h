@@ -87,6 +87,7 @@ public:
     API::ViewClient& client() const { return *m_client; }
     const WebCore::IntSize& size() const { return m_size; }
     OptionSet<WebCore::ActivityState> viewState() const { return m_viewStateFlags; }
+    virtual void setViewState(OptionSet<WebCore::ActivityState>) { };
 
 #if USE(ATK)
     WebKitWebViewAccessible* accessible() const;

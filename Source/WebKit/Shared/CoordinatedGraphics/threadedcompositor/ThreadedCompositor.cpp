@@ -197,6 +197,27 @@ void ThreadedCompositor::suspend()
     });
 }
 
+void ThreadedCompositor::suspendToTransparent()
+{
+    // If we're in nonCompositedWebGL mode, the WebGLRenderingContext will have painted the
+    // transparent background. We don't need to do anything besides suspending.
+    if (m_nonCompositedWebGLEnabled) {
+        suspend();
+        return;
+    }
+
+    // When not in nonCompositedWebGL, we need to request a redraw to paint the transparent
+    // background, and when the scene is completed, suspend.
+    if (++m_suspendedCount > 1)
+        return;
+
+    // Set the flag for transparent and request a redraw.
+    m_compositingRunLoop->performTaskSync([this, protectedThis = Ref { *this }] {
+        m_suspendToTransparentState = SuspendToTransparentState::Requested;
+    });
+    m_compositingRunLoop->scheduleUpdate();
+}
+
 void ThreadedCompositor::resume()
 {
     ASSERT(m_suspendedCount > 0);
@@ -205,8 +226,10 @@ void ThreadedCompositor::resume()
 
     m_compositingRunLoop->performTaskSync([this, protectedThis = Ref { *this }] {
         m_scene->setActive(true);
+        m_suspendToTransparentState = SuspendToTransparentState::None;
     });
     m_compositingRunLoop->resume();
+    m_compositingRunLoop->scheduleUpdate();
 }
 
 void ThreadedCompositor::setScrollPosition(const IntPoint& scrollPosition, float scale)
@@ -328,7 +351,13 @@ void ThreadedCompositor::renderLayerTree()
     WTFEndSignpost(this, ApplyStateChanges);
 
     WTFBeginSignpost(this, PaintToGLContext);
-    m_scene->paintToCurrentGLContext(viewportTransform, FloatRect { FloatPoint { }, viewportSize }, m_flipY);
+    if (m_suspendToTransparentState != SuspendToTransparentState::Requested)
+        m_scene->paintToCurrentGLContext(viewportTransform, FloatRect { FloatPoint { }, viewportSize }, m_flipY);
+    else {
+        glClearColor(0, 0, 0, 0);
+        glClear(GL_COLOR_BUFFER_BIT);
+        m_suspendToTransparentState = SuspendToTransparentState::WaitingForFrameComplete;
+    }
     WTFEndSignpost(this, PaintToGLContext);
 
     WebCore::Damage boundsDamage;
@@ -365,6 +394,12 @@ void ThreadedCompositor::sceneUpdateFinished()
         shouldDispatchDisplayRefreshCallback |= m_attributes.clientRendersNextFrame;
     }
 #endif
+
+    if (m_suspendToTransparentState == SuspendToTransparentState::WaitingForFrameComplete) {
+        m_compositingRunLoop->suspend();
+        m_scene->setActive(false);
+        m_suspendToTransparentState = SuspendToTransparentState::None;
+    }
 
     Locker stateLocker { m_compositingRunLoop->stateLock() };
 

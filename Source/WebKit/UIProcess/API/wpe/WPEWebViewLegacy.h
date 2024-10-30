@@ -63,7 +63,7 @@ private:
     void synthesizeCompositionKeyPress(const String&, std::optional<Vector<WebCore::CompositionUnderline>>&&, std::optional<WebKit::EditingRange>&&) override;
     void callAfterNextPresentationUpdate(CompletionHandler<void()>&&) override;
 
-    void setViewState(OptionSet<WebCore::ActivityState>);
+    void setViewState(OptionSet<WebCore::ActivityState>) final;
     void handleKeyboardEvent(struct wpe_input_keyboard_event*);
 
     struct wpe_view_backend* m_backend { nullptr };
