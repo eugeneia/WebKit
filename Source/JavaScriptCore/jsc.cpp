@@ -3386,6 +3386,8 @@ int jscmain(int argc, char** argv);
 #if OS(DARWIN) || OS(LINUX)
 static size_t memoryLimit;
 
+static uint64_t sampleFootprint = 0;
+
 static void crashIfExceedingMemoryLimit()
 {
     if (!memoryLimit)
@@ -3394,6 +3396,9 @@ static void crashIfExceedingMemoryLimit()
     if (footprint.current > memoryLimit) {
         dataLogLn("Crashing because current footprint: ", footprint.current, " exceeds limit: ", memoryLimit);
         CRASH();
+    }
+    if (sampleFootprint++ % 1000 == 0) {
+        dataLogLn("Current footprint: ", footprint.current);
     }
 }
 

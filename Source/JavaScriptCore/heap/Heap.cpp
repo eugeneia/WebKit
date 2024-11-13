@@ -2382,7 +2382,7 @@ void Heap::notifyIncrementalSweeper()
 
 void Heap::updateAllocationLimits()
 {
-    constexpr bool verbose = false;
+    constexpr bool verbose = true;
     
     dataLogLnIf(verbose, "\nnonOversizedBytesAllocatedThisCycle = ", m_nonOversizedBytesAllocatedThisCycle, ", oversizedBytesAllocatedThisCycle", m_oversizedBytesAllocatedThisCycle);
     
@@ -2523,9 +2523,12 @@ void Heap::setGarbageCollectionTimerEnabled(bool enable)
         m_edenActivityCallback->setEnabled(enable);
 }
 
+static uint64_t sample_didAllocate = 0;
+
 constexpr size_t oversizedAllocationThreshold = 64 * KB;
 void Heap::didAllocate(size_t bytes)
 {
+    dataLogLnIf(sample_didAllocate++ % 1000 == 0, "didAllocate ", bytes);
     if (m_edenActivityCallback)
         m_edenActivityCallback->didAllocate(*this, totalBytesAllocatedThisCycle() + m_bytesAbandonedSinceLastFullCollect);
     if (bytes >= oversizedAllocationThreshold) {
@@ -2731,6 +2734,8 @@ void Heap::reportExternalMemoryVisited(size_t size)
 }
 #endif
 
+static uint64_t sample = 0;
+
 void Heap::collectIfNecessaryOrDefer(GCDeferralContext* deferralContext)
 {
     ASSERT(deferralContext || isDeferred() || !DisallowGC::isInEffectOnCurrentThread());
@@ -2782,18 +2787,24 @@ void Heap::collectIfNecessaryOrDefer(GCDeferralContext* deferralContext)
             bytesAllowedThisCycle = std::min(m_maxEdenSizeWhenCritical, bytesAllowedThisCycle);
 #endif
 
+        dataLogLnIf(isCritical, "isCritical=true");
+
         size_t bytesAllocatedThisCycle = totalBytesAllocatedThisCycle();
-        if (bytesAllocatedThisCycle <= bytesAllowedThisCycle)
+        dataLogLnIf(sample++ % 100 == 0, "bytesAllocatedThisCycle <= bytesAllowedThisCycle ", bytesAllocatedThisCycle, " / ", bytesAllowedThisCycle);
+        if (bytesAllocatedThisCycle <= bytesAllowedThisCycle) {
             return false;
+        }
 
         // We don't want to GC if the last oversized allocation makes up too much of the memory allocated this cycle since it's likely
         //  that object is still live and doesn't give us much indication about how much memory we could actually reclaim. That said,
         // if the system is cricital or we have a small heap we want to be very agressive about reclaiming memory to reduce overall
         // pressure on the system.
-        if (!isCritical && m_heapType == HeapType::Large) {
-            if (static_cast<double>(m_lastOversidedAllocationThisCycle) / bytesAllocatedThisCycle > 1.0 / 3.0)
-                return false;
-        }
+        // if (!isCritical && m_heapType == HeapType::Large) {
+        //     if (static_cast<double>(m_lastOversidedAllocationThisCycle) / bytesAllocatedThisCycle > 1.0 / 3.0) {
+        //         dataLogLn("Bail large");
+        //         return false;
+        //     }
+        // }
 
         dataLogLnIf(logRequestGC, "Requesting GC because bytes allocated this cycle: ", bytesAllocatedThisCycle, " exceed bytes allowed: ", bytesAllowedThisCycle, ConditionalDump(isCritical, " (critical)"), " normal bytes: ", m_nonOversizedBytesAllocatedThisCycle, " oversized bytes: ", m_oversizedBytesAllocatedThisCycle, " last oversized: ", m_lastOversidedAllocationThisCycle);
         return true;

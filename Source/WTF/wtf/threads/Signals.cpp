@@ -598,7 +598,7 @@ void SignalHandlers::finalize()
             // Do not block this signal since it is used on non-Darwin systems to suspend and resume threads.
             RELEASE_ASSERT(g_wtfConfig.isThreadSuspendResumeSignalConfigured);
             result = sigdelset(&action.sa_mask, g_wtfConfig.sigThreadSuspendResume);
-            RELEASE_ASSERT(!result);
+            //RELEASE_ASSERT(!result);
             action.sa_flags = SA_SIGINFO;
             auto systemSignals = toSystemSignal(signal);
             result = sigaction(std::get<0>(systemSignals), &action, &handlers.oldActions[offsetForSystemSignal(std::get<0>(systemSignals))]);

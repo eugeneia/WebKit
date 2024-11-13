@@ -109,6 +109,8 @@ void LocalAllocator::stopAllocatingForGood()
     reset();
 }
 
+static uint64_t sample_didAllocate = 0;
+
 void* LocalAllocator::allocateSlowCase(JSC::Heap& heap, size_t cellSize, GCDeferralContext* deferralContext, AllocationFailureMode failureMode)
 {
     SuperSamplerScope superSamplerScope(false);
@@ -116,6 +118,7 @@ void* LocalAllocator::allocateSlowCase(JSC::Heap& heap, size_t cellSize, GCDefer
     doTestCollectionsIfNeeded(heap, deferralContext);
 
     ASSERT(!m_directory->markedSpace().isIterating());
+    dataLogLnIf(sample_didAllocate++ % 100 == 0, "LocalAllocator::allocateSlowCase ", m_freeList.originalSize());
     heap.didAllocate(m_freeList.originalSize());
     
     didConsumeFreeList();

@@ -2547,13 +2547,13 @@ JSC_DEFINE_HOST_FUNCTION(functionTriggerMemoryPressure, (JSGlobalObject* globalO
     globalObject->vm().drainMicrotasks();
     WTF::MemoryPressureHandler::singleton().beginSimulatedMemoryPressure();
     WTF::MemoryPressureHandler::singleton().beginSimulatedMemoryWarning();
-    VMInspector::gc(&globalObject->vm());
-    WTF::MemoryPressureHandler::singleton().endSimulatedMemoryPressure();
-    WTF::MemoryPressureHandler::singleton().endSimulatedMemoryWarning();
-#if ENABLE(REFTRACKER)
-    if (Options::enableStrongRefTracker())
-        StrongRefTracker::refTrackerSingleton().logAllLiveReferences();
-#endif
+//     VMInspector::gc(&globalObject->vm());
+//     WTF::MemoryPressureHandler::singleton().endSimulatedMemoryPressure();
+//     WTF::MemoryPressureHandler::singleton().endSimulatedMemoryWarning();
+// #if ENABLE(REFTRACKER)
+//     if (Options::enableStrongRefTracker())
+//         StrongRefTracker::refTrackerSingleton().logAllLiveReferences();
+// #endif
     return JSValue::encode(jsUndefined());
 }
 

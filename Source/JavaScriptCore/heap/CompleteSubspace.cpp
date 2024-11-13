@@ -111,6 +111,8 @@ void* CompleteSubspace::allocateSlow(VM& vm, size_t size, GCDeferralContext* def
     return result;
 }
 
+static uint64_t sample_didAllocate = 0;
+
 void* CompleteSubspace::tryAllocateSlow(VM& vm, size_t size, GCDeferralContext* deferralContext)
 {
     if constexpr (validateDFGDoesGC)
@@ -143,6 +145,7 @@ void* CompleteSubspace::tryAllocateSlow(VM& vm, size_t size, GCDeferralContext* 
     if (auto* set = m_space.preciseAllocationSet())
         set->add(allocation->cell());
     ASSERT(allocation->indexInSpace() == m_space.m_preciseAllocations.size() - 1);
+    dataLogLnIf(sample_didAllocate++ % 100 == 0, "CompleteSubspace::tryAllocateSlow ", size);
     vm.heap.didAllocate(size);
     m_space.m_capacity += size;
     
@@ -200,6 +203,7 @@ void* CompleteSubspace::reallocatePreciseAllocationNonVirtual(VM& vm, HeapCell* 
     }
 
     m_space.m_preciseAllocations[oldIndexInSpace] = allocation;
+    dataLogLnIf(sample_didAllocate++ % 100 == 0, "CompleteSubspace::reallocatePreciseAllocationNonVirtual ", difference);
     vm.heap.didAllocate(difference);
     m_space.m_capacity += difference;
 
