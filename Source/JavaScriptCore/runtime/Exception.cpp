@@ -83,6 +83,7 @@ void Exception::finishCreation(VM& vm, StackCaptureAction action)
     if (action == StackCaptureAction::CaptureStack)
         vm.interpreter.getStackTrace(this, stackTrace, 0, Options::exceptionStackTraceLimit());
     m_stack = WTFMove(stackTrace);
+    vm.heap.reportExtraMemoryAllocated(this, m_stack.size() * sizeof(StackFrame));
 }
 
 } // namespace JSC
