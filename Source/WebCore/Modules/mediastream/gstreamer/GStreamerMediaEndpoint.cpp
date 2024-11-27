@@ -2228,7 +2228,9 @@ std::optional<bool> GStreamerMediaEndpoint::canTrickleIceCandidates() const
 void GStreamerMediaEndpoint::startRTCLogs()
 {
     m_isGatheringRTCLogs = true;
+#if !RELEASE_LOG_DISABLED
     startLoggingStats();
+#endif
 }
 
 void GStreamerMediaEndpoint::stopRTCLogs()
