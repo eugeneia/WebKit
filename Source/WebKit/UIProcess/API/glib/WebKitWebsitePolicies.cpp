@@ -148,7 +148,7 @@ static void webkit_website_policies_class_init(WebKitWebsitePoliciesClass* findC
             "autoplay",
             nullptr, nullptr,
             WEBKIT_TYPE_AUTOPLAY_POLICY,
-            WEBKIT_AUTOPLAY_ALLOW_WITHOUT_SOUND,
+            WEBKIT_AUTOPLAY_ALLOW,
             static_cast<GParamFlags>(WEBKIT_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY)));
 }
 
