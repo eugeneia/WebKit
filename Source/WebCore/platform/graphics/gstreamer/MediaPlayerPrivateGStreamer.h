@@ -146,6 +146,7 @@ public:
 #if ENABLE(MEDIA_STREAM)
     void load(MediaStreamPrivate&) override;
 #endif
+    bool isMediaStreamPlayer() const;
     void cancelLoad() final;
     void prepareToPlay() final;
     void play() override;
@@ -228,7 +229,7 @@ public:
     void flushCurrentBuffer();
 #endif
 
-    void handleTextSample(GRefPtr<GstSample>&&, const String& streamId);
+    void handleTextSample(GRefPtr<GstSample>&&, TrackID streamId);
 
 #if !RELEASE_LOG_DISABLED
     const Logger& logger() const final { return m_logger; }
@@ -244,7 +245,7 @@ public:
     // to avoid deadlocks from threads in the playback pipeline waiting for the main thread.
     AbortableTaskQueue& sinkTaskQueue() { return m_sinkTaskQueue; }
 
-    String codecForStreamId(const String& streamId);
+    String codecForStreamId(TrackID streamId);
     bool shouldDownload() { return m_fillTimer.isActive(); }
 
     void setQuirkState(const GStreamerQuirk* owner, std::unique_ptr<GStreamerQuirkBase::GStreamerQuirkState>&& state)
@@ -342,7 +343,7 @@ protected:
 #endif
 
 #if USE(TEXTURE_MAPPER)
-    void pushTextureToCompositor();
+    void pushTextureToCompositor(bool isDuplicateSample);
 #if USE(NICOSIA)
     void swapBuffersIfNeeded() final;
 #else
@@ -523,8 +524,6 @@ private:
     GstElement* createAudioSink();
     GstElement* audioSink() const { return m_audioSink.get(); }
 
-    bool isMediaStreamPlayer() const;
-
     friend class MediaPlayerFactoryGStreamer;
     static void getSupportedTypes(HashSet<String>&);
     static MediaPlayer::SupportsType supportsType(const MediaEngineSupportParameters&);
@@ -640,27 +639,27 @@ private:
 
     // playbin3 only:
     bool m_waitingForStreamsSelectedEvent { true };
-    AtomString m_currentAudioStreamId; // Currently playing.
-    AtomString m_currentVideoStreamId;
-    AtomString m_currentTextStreamId;
-    AtomString m_wantedAudioStreamId; // Set in JavaScript.
-    AtomString m_wantedVideoStreamId;
-    AtomString m_wantedTextStreamId;
-    AtomString m_requestedAudioStreamId; // Expected in the next STREAMS_SELECTED message.
-    AtomString m_requestedVideoStreamId;
-    AtomString m_requestedTextStreamId;
+    std::optional<TrackID> m_currentAudioStreamId; // Currently playing.
+    std::optional<TrackID> m_currentVideoStreamId;
+    std::optional<TrackID> m_currentTextStreamId;
+    std::optional<TrackID> m_wantedAudioStreamId; // Set in JavaScript.
+    std::optional<TrackID> m_wantedVideoStreamId;
+    std::optional<TrackID> m_wantedTextStreamId;
+    std::optional<TrackID> m_requestedAudioStreamId; // Expected in the next STREAMS_SELECTED message.
+    std::optional<TrackID> m_requestedVideoStreamId;
+    std::optional<TrackID> m_requestedTextStreamId;
 
 #if ENABLE(WEB_AUDIO)
     RefPtr<AudioSourceProviderGStreamer> m_audioSourceProvider;
 #endif
     GRefPtr<GstElement> m_downloadBuffer;
 
-    HashMap<AtomString, Ref<AudioTrackPrivateGStreamer>> m_audioTracks;
-    HashMap<AtomString, Ref<VideoTrackPrivateGStreamer>> m_videoTracks;
-    HashMap<AtomString, Ref<InbandTextTrackPrivateGStreamer>> m_textTracks;
+    TrackIDHashMap<Ref<AudioTrackPrivateGStreamer>> m_audioTracks;
+    TrackIDHashMap<Ref<VideoTrackPrivateGStreamer>> m_videoTracks;
+    TrackIDHashMap<Ref<InbandTextTrackPrivateGStreamer>> m_textTracks;
     RefPtr<InbandMetadataTextTrackPrivateGStreamer> m_chaptersTrack;
 #if USE(GSTREAMER_MPEGTS)
-    HashMap<AtomString, RefPtr<InbandMetadataTextTrackPrivateGStreamer>> m_metadataTracks;
+    TrackIDHashMap<RefPtr<InbandMetadataTextTrackPrivateGStreamer>> m_metadataTracks;
 #endif
     virtual bool isMediaSource() const { return false; }
 
@@ -706,7 +705,7 @@ private:
 
     void setupCodecProbe(GstElement*);
     Lock m_codecsLock;
-    HashMap<String, String> m_codecs WTF_GUARDED_BY_LOCK(m_codecsLock);
+    TrackIDHashMap<String> m_codecs WTF_GUARDED_BY_LOCK(m_codecsLock);
 
     bool isSeamlessSeekingEnabled() const { return m_seekFlags & (1 << GST_SEEK_FLAG_SEGMENT); }
 
@@ -714,6 +713,8 @@ private:
 
     RefPtr<GStreamerQuirksManager> m_quirksManagerForTesting;
     HashMap<const GStreamerQuirk*, std::unique_ptr<GStreamerQuirkBase::GStreamerQuirkState>> m_quirkStates;
+
+    MediaTime m_estimatedVideoFrameDuration { MediaTime::zeroTime() };
 
     RefPtr<GStreamerHolePunchHost> m_gstreamerHolePunchHost;
     Lock m_holePunchLock;
