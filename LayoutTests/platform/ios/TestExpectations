@@ -3272,10 +3272,10 @@ webkit.org/b/207703 imported/w3c/web-platform-tests/service-workers/service-work
 
 webkit.org/b/207705 imported/w3c/web-platform-tests/service-workers/service-worker/websocket.https.html [ Pass Failure ]
 
-webkit.org/b/202003 imported/w3c/web-platform-tests/websockets/bufferedAmount-unchanged-by-sync-xhr.any.worker.html [ Pass Failure ]
+webkit.org/b/202003 imported/w3c/web-platform-tests/websockets/bufferedAmount-unchanged-by-sync-xhr.any.worker.html?default [ Pass Failure ]
 
-webkit.org/b/213516 imported/w3c/web-platform-tests/websockets/Close-reason-unpaired-surrogates.any.html [ Pass Failure ]
-webkit.org/b/213516 imported/w3c/web-platform-tests/websockets/Close-reason-unpaired-surrogates.any.worker.html [ Pass Failure ]
+webkit.org/b/213516 imported/w3c/web-platform-tests/websockets/Close-reason-unpaired-surrogates.any.html?default [ Pass Failure ]
+webkit.org/b/213516 imported/w3c/web-platform-tests/websockets/Close-reason-unpaired-surrogates.any.worker.html?default [ Pass Failure ]
 
 webkit.org/b/207762 http/wpt/service-workers/check-service-worker-header.https.html [ Pass Failure ]
 
@@ -6562,7 +6562,7 @@ webkit.org/b/238954 imported/w3c/web-platform-tests/css/selectors/invalidation/u
 
 webkit.org/b/231780 [ Debug ] imported/w3c/web-platform-tests/webrtc/simulcast/basic.https.html [ Pass Failure ]
 
-webkit.org/b/232099 imported/w3c/web-platform-tests/websockets/Close-1000.any.html [ Pass Crash ]
+webkit.org/b/232099 imported/w3c/web-platform-tests/websockets/Close-1000.any.html?default [ Pass Crash ]
 
 webkit.org/b/225528 http/wpt/fetch/fetch-response-body-stop-in-worker.html [ Pass Crash ]
 
@@ -7466,10 +7466,6 @@ imported/w3c/web-platform-tests/workers/SharedWorker_dataUrl.html [ Pass Failure
 
 # webkit.org/b/261919 NEW TEST(247465@main): [ macOS wk2 ] webanimations/frame-rate/animation-frame-rate-alignment-started-with-one-frame-separation.html is a flaky failure.
 webanimations/frame-rate/animation-frame-rate-alignment-started-with-one-frame-separation.html [ Pass Failure ]
-
-# webkit.org/b/276764 REGRESSION(280750@main) imported/w3c/web-platform-tests/websockets/basic-auth.any.html?wss regressed
-imported/w3c/web-platform-tests/websockets/basic-auth.any.html?wss [ Pass Failure ]
-imported/w3c/web-platform-tests/websockets/basic-auth.any.serviceworker.html?wss [ Pass Failure ]
 
 # webkit.org/b/277905 [ iOS ] fast/scrolling/ios/scroll-anchoring-momentum-scroll.html is a flaky text failure
 fast/scrolling/ios/scroll-anchoring-momentum-scroll.html [ Pass Failure ]
