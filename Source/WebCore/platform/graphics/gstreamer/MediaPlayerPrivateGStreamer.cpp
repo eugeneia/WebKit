@@ -4725,6 +4725,9 @@ String MediaPlayerPrivateGStreamer::codecForStreamId(TrackID streamId)
 
 void MediaPlayerPrivateGStreamer::setVideoRectangle(const IntRect& rect)
 {
+    if (!m_videoSink)
+        return;
+
     Locker locker { m_holePunchLock };
 
     if (!m_visible || m_suspended)
