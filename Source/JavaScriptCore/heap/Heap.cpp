@@ -2793,7 +2793,7 @@ void Heap::collectIfNecessaryOrDefer(GCDeferralContext* deferralContext)
 #if USE(BMALLOC_MEMORY_FOOTPRINT_API)
         isCritical = overCriticalMemoryThreshold();
         if (isCritical)
-            bytesAllowedThisCycle = std::min(m_maxEdenSizeWhenCritical, bytesAllowedThisCycle);
+            bytesAllowedThisCycle = std::min(m_maxEdenSizeWhenCritical, bytesAllowedThisCycle/10);
 #endif
 
         size_t bytesAllocatedThisCycle = totalBytesAllocatedThisCycle();
