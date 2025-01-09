@@ -245,7 +245,9 @@ void DrawingAreaCoordinatedGraphics::updatePreferences(const WebPreferencesStore
         settings.setAsyncOverflowScrollingEnabled(false);
     }
 
+#if ENABLE(WEBGL)
     settings.setAllowWebGLInWorkers(!store.getBoolValueForKey(WebPreferencesKey::nonCompositedWebGLEnabledKey()));
+#endif
 }
 
 void DrawingAreaCoordinatedGraphics::mainFrameContentSizeChanged(WebCore::FrameIdentifier, const IntSize& size)
