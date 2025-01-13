@@ -66,9 +66,17 @@ public:
         return result;
     }
 
+    static void setCurrentThreadStackOriginLimit(void* limit)
+    {
+        RELEASE_ASSERT(m_origin_limit == nullptr);
+        m_origin_limit = limit;
+    }
+
     void* origin() const
     {
         ASSERT(m_origin);
+        if (m_origin_limit != nullptr)
+            return m_origin_limit;
         return m_origin;
     }
 
@@ -153,6 +161,8 @@ private:
 
     void* m_origin;
     void* m_bound;
+
+    static thread_local void* m_origin_limit;
 
     friend class StackStats;
 };

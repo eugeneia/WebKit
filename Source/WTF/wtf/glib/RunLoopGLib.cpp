@@ -96,6 +96,15 @@ RunLoop::~RunLoop()
 
 void RunLoop::run()
 {
+    // On 32-bit armv7/linux we run into an issue where the environment strings
+    // located at the bottom of the stack are interpreted as cells pointing
+    // into the heap, keeping actually dead objects alive.
+    //
+    // Set the thread stack origin limit here to avoid scanning for roots
+    // beyond this frame.
+    int stackOrigin;
+    StackBounds::setCurrentThreadStackOriginLimit(&stackOrigin);
+
     Ref runLoop = RunLoop::current();
     GMainContext* mainContext = runLoop->m_mainContext.get();
 

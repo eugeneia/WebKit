@@ -50,6 +50,8 @@
 
 namespace WTF {
 
+thread_local void* StackBounds::m_origin_limit = nullptr;
+
 #if OS(DARWIN)
 
 StackBounds StackBounds::newThreadStackBounds(PlatformThreadHandle thread)
