@@ -179,6 +179,11 @@ void TextureMapperPlatformLayerBuffer::notifyPositionToHolePunchClient(const Flo
         m_holePunchClient->setVideoRectangle(enclosingIntRect(modelViewMatrix.mapRect(targetRect)));
 }
 
+void TextureMapperPlatformLayerBuffer::paintTransparentRectangle(TextureMapper& textureMapper, const FloatRect& targetRect, const TransformationMatrix& modelViewMatrix)
+{
+    textureMapper.drawSolidColor(targetRect, modelViewMatrix, Color::transparentBlack, false);
+}
+
 } // namespace WebCore
 
 #endif // USE(COORDINATED_GRAPHICS)

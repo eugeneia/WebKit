@@ -48,6 +48,7 @@ public:
 
     virtual bool isHolePunchBuffer() const { return false; }
     virtual void notifyPositionToHolePunchClient(const FloatRect&, const TransformationMatrix&) { };
+    virtual void paintTransparentRectangle(TextureMapper&, const FloatRect&, const TransformationMatrix&) { };
 
 protected:
     TextureMapperPlatformLayer::Client* client() { return m_client; }
