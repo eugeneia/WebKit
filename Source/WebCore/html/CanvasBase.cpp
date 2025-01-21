@@ -279,6 +279,26 @@ bool CanvasBase::shouldAccelerate(uint64_t area) const
     if (!scriptExecutionContext()->settingsValues().acceleratedCompositingEnabled)
         return false;
 #endif
+
+    // Don't accelerate canvases created on worker threads.
+    if (!isMainThread())
+        return false;
+
+    // Don't accelerate canvases when nonCompositedWebGL is enabled.
+    if (scriptExecutionContext()->settingsValues().nonCompositedWebGLEnabled)
+        return false;
+
+    // Don't accelerate OffscreenCanvas.
+    if (isOffscreenCanvas())
+        return false;
+
+    // Do not accelerate canvases that are smaller than 1/4 of the display size
+    if (isHTMLCanvasElement()) {
+        RefPtr htmlCanvas = dynamicDowncast<HTMLCanvasElement>(this);
+        if (area < htmlCanvas->document().view()->root()->hostWindow()->screenSize().area() / 4)
+            return false;
+    }
+
     return true;
 #else
     UNUSED_PARAM(area);
