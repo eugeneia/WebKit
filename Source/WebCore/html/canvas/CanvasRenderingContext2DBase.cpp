@@ -270,7 +270,9 @@ bool CanvasRenderingContext2DBase::isSurfaceBufferTransparentBlack(SurfaceBuffer
 #if USE(SKIA)
 bool CanvasRenderingContext2DBase::delegatesDisplay() const
 {
-    return isAccelerated();
+    if (canvasBase().buffer())
+        return isAccelerated();
+    return false;
 }
 
 RefPtr<GraphicsLayerContentsDisplayDelegate> CanvasRenderingContext2DBase::layerContentsDisplayDelegate()
