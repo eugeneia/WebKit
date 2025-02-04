@@ -31,6 +31,7 @@
 
 #include "BytecodeStructs.h"
 #include "FrameTracers.h"
+#include "Heap.h"
 #include "JITExceptions.h"
 #include "JSWebAssemblyArray.h"
 #include "JSWebAssemblyException.h"
@@ -133,6 +134,12 @@ static inline bool jitCompileAndSetHeuristics(Wasm::LLIntCallee* callee, JSWebAs
         dataLogLnIf(Options::verboseOSR(), "    Code was already compiled.");
         tierUpCounter.optimizeSoon();
         return true;
+    }
+
+    if (!Options::jitUnderMemoryPressure() && instance->vm().heap.overCriticalMemoryThreshold()) {
+        dataLogLnIf(Options::verboseOSR(), "    Not JITing because of memory pressure.");
+        tierUpCounter.deferIndefinitely();
+        return false;
     }
 
     bool compile = false;

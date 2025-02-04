@@ -43,6 +43,7 @@
 #include "FunctionAllowlist.h"
 #include "FunctionCodeBlock.h"
 #include "GetterSetter.h"
+#include "Heap.h"
 #include "InterpreterInlines.h"
 #include "JITExceptions.h"
 #include "JITWorklist.h"
@@ -422,6 +423,11 @@ static UGPRPair entryOSR(CodeBlock* codeBlock, const char *name, EntryKind kind)
         LLINT_RETURN_TWO(nullptr, nullptr);
     }
     VM& vm = codeBlock->vm();
+    if (!Options::jitUnderMemoryPressure() && vm.heap.overCriticalMemoryThreshold()) {
+        dataLogLnIf(Options::verboseOSR(), "    Not JITing because of memory pressure.");
+        codeBlock->dontJITAnytimeSoon();
+        LLINT_RETURN_TWO(nullptr, nullptr);
+    }
     if (!jitCompileAndSetHeuristics(vm, codeBlock))
         LLINT_RETURN_TWO(nullptr, nullptr);
     

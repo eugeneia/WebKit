@@ -41,6 +41,7 @@
 #include "ExceptionFuzz.h"
 #include "FrameTracers.h"
 #include "GetterSetter.h"
+#include "Heap.h"
 #include "ICStats.h"
 #include "InlineCacheCompiler.h"
 #include "Interpreter.h"
@@ -2985,6 +2986,13 @@ JSC_DEFINE_JIT_OPERATION(operationOptimize, UGPRPair, (VM* vmPointer, uint32_t b
         CODEBLOCK_LOG_EVENT(codeBlock, "delayOptimizeToDFG", ("should always be inlined"));
         updateAllPredictionsAndOptimizeAfterWarmUp(codeBlock);
         dataLogLnIf(Options::verboseOSR(), "Choosing not to optimize ", *codeBlock, " yet, because m_shouldAlwaysBeInlined == true.");
+        OPERATION_RETURN(scope, encodeResult(nullptr, nullptr));
+    }
+
+    if (!Options::jitUnderMemoryPressure() && vm.heap.overCriticalMemoryThreshold()) {
+        CODEBLOCK_LOG_EVENT(codeBlock, "delayOptimizeToDFG", ("memory pressure"));
+        updateAllPredictionsAndOptimizeAfterWarmUp(codeBlock);
+        dataLogLnIf(Options::verboseOSR(), "Choosing not to optimize ", *codeBlock, " yet, because we are under memory pressure.");
         OPERATION_RETURN(scope, encodeResult(nullptr, nullptr));
     }
 

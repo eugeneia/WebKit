@@ -748,8 +748,10 @@ private:
         Direct
     };
 
+public:
     bool overCriticalMemoryThreshold(MemoryThresholdCallType memoryThresholdCallType = MemoryThresholdCallType::Cached);
-    
+
+private:
     template<typename Visitor>
     void iterateExecutingAndCompilingCodeBlocks(Visitor&, const Function<void(CodeBlock*)>&);
     
