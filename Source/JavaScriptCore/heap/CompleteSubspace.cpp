@@ -130,7 +130,7 @@ void* CompleteSubspace::tryAllocateSlow(VM& vm, size_t size, GCDeferralContext* 
     
     vm.heap.collectIfNecessaryOrDefer(deferralContext);
     if (UNLIKELY(Options::maxHeapSizeAsRAMSizeMultiple())) {
-        if (vm.heap.capacity() > Options::maxHeapSizeAsRAMSizeMultiple() * WTF::ramSize())
+        if (vm.heap.capacity() / WTF::ramSize() > Options::maxHeapSizeAsRAMSizeMultiple())
             return nullptr;
     }
 
