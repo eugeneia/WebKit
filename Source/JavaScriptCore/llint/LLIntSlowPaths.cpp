@@ -69,6 +69,7 @@
 #include "SuperSampler.h"
 #include "VMInlines.h"
 #include "VMTrapsInlines.h"
+#include <wtf/MemoryPressureHandler.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/StringPrintStream.h>
 
@@ -420,6 +421,11 @@ static UGPRPair entryOSR(CodeBlock* codeBlock, const char *name, EntryKind kind)
         codeBlock->llintExecuteCounter());
     
     if (!shouldJIT(codeBlock)) {
+        codeBlock->dontJITAnytimeSoon();
+        LLINT_RETURN_TWO(nullptr, nullptr);
+    }
+    if (!Options::jitWhenCritical() && MemoryPressureHandler::singleton().isUnderMemoryPressure()) {
+        dataLogLnIf(Options::verboseOSR(), "    Not JITing because of memory pressure.");
         codeBlock->dontJITAnytimeSoon();
         LLINT_RETURN_TWO(nullptr, nullptr);
     }
