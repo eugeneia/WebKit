@@ -2607,7 +2607,8 @@ bool Heap::useGenerationalGC()
 
 bool Heap::shouldSweepSynchronously()
 {
-    return Options::sweepSynchronously() || VM::isInMiniMode();
+    return Options::sweepSynchronously() || VM::isInMiniMode()
+        || (Options::sweepSynchronouslyUnderMemoryPressure() && overCriticalMemoryThreshold());
 }
 
 bool Heap::shouldDoFullCollection()

@@ -380,6 +380,7 @@ bool hasCapacityToUseLargeGigacage();
     v(Bool, useZombieMode, false, Normal, "debugging option to scribble over dead objects with 0xbadbeef0"_s) \
     v(Bool, useImmortalObjects, false, Normal, "debugging option to keep all objects alive forever"_s) \
     v(Bool, sweepSynchronously, false, Normal, "debugging option to sweep all dead objects synchronously at GC end before resuming mutator"_s) \
+    v(Bool, sweepSynchronouslyUnderMemoryPressure, false, Normal, "option to sweep all dead objects synchronously at GC end when pressed for memory"_s) \
     v(Unsigned, maxSingleAllocationSize, 0, Configurable, "debugging option to limit individual allocations to a max size (0 = limit not set, N = limit size in bytes)"_s) \
     \
     v(GCLogLevel, logGC, GCLogging::None, Normal, "debugging option to log GC activity (0 = None, 1 = Basic, 2 = Verbose)"_s) \
