@@ -194,7 +194,7 @@ EncodedJSValue createArrayFromDataSegment(JSWebAssemblyInstance* instance, Field
     uint32_t arrayLengthInBytes = arraySize * elementSize;
 
     // Check for offset + arrayLengthInBytes overflow
-    if (UNLIKELY(sumOverflows<uint32_t>(offset, arrayLengthInBytes)))
+    if (UNLIKELY(sumOverflows<uint32_t>(offset * elementSize, arrayLengthInBytes)))
         return JSValue::encode(jsNull());
 
     JSGlobalObject* globalObject = instance->globalObject();
