@@ -116,7 +116,7 @@ public:
     bool isUnderMemoryWarning() const
     {
         return m_memoryPressureStatus == SystemMemoryPressureStatus::Warning
-#if PLATFORM(MAC)
+#if PLATFORM(MAC) || PLATFORM(WPE)
             || m_memoryUsagePolicy == MemoryUsagePolicy::Conservative
 #endif
             || m_isSimulatingMemoryWarning;
@@ -125,7 +125,7 @@ public:
     bool isUnderMemoryPressure() const
     {
         return m_memoryPressureStatus == SystemMemoryPressureStatus::Critical
-#if PLATFORM(MAC)
+#if PLATFORM(MAC) || PLATFORM(WPE)
             || m_memoryUsagePolicy >= MemoryUsagePolicy::Strict
 #endif
             || m_isSimulatingMemoryPressure;
@@ -134,6 +134,7 @@ public:
     bool isSimulatingMemoryWarning() const { return m_isSimulatingMemoryWarning; }
     bool isSimulatingMemoryPressure() const { return m_isSimulatingMemoryPressure; }
     void setMemoryPressureStatus(SystemMemoryPressureStatus);
+    double criticalMemoryThreshold() const { return m_configuration.baseThreshold * m_configuration.strictThresholdFraction; }
 
     WTF_EXPORT_PRIVATE MemoryUsagePolicy currentMemoryUsagePolicy();
 
