@@ -129,7 +129,7 @@ size_t minHeapSize(HeapType heapType, size_t ramSize)
 
 size_t proportionalHeapSize(size_t heapSize, size_t ramSize)
 {
-    if (VM::isInMiniMode())
+    if (VM::isInMiniMode() || Options::useMiniHeap())
         return Options::miniVMHeapGrowthFactor() * heapSize;
 
 #if USE(BMALLOC_MEMORY_FOOTPRINT_API)

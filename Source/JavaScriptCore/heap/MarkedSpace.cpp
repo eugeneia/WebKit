@@ -353,7 +353,7 @@ bool MarkedSpace::isPagedOut()
             return IterationStatus::Continue;
         });
     // FIXME: Consider taking PreciseAllocations into account here.
-    double maxHeapGrowthFactor = VM::isInMiniMode() ? Options::miniVMHeapGrowthFactor() : Options::largeHeapGrowthFactor();
+    double maxHeapGrowthFactor = VM::isInMiniMode() || Options::useMiniHeap() ? Options::miniVMHeapGrowthFactor() : Options::largeHeapGrowthFactor();
     double bailoutPercentage = Options::customFullGCCallbackBailThreshold() == -1.0 ? maxHeapGrowthFactor - 1 : Options::customFullGCCallbackBailThreshold();
     return pagedOutPagesStats.mean() > pagedOutPagesStats.count() * bailoutPercentage;
 }

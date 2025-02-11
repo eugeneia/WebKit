@@ -535,6 +535,8 @@ bool hasCapacityToUseLargeGigacage();
     v(Bool, useArrayAllocationProfiling, true, Normal, "If true, we will use our normal array allocation profiling. If false, the allocation profile will always claim to be undecided."_s) \
     v(Bool, forcePolyProto, false, Normal, "If true, create_this will always create an object with a poly proto structure."_s) \
     v(Bool, forceMiniVMMode, false, Normal, "If true, it will force mini VM mode on."_s) \
+    v(Bool, useMiniHeap, false, Normal, "If true, it will force mini Heap mode on."_s) \
+    v(Bool, useScavengerMiniMode, false, Normal, "If true, it will force scavenger mini mode on."_s) \
     v(Bool, useTracePoints, false, Normal, nullptr) \
     v(Bool, useCompilerSignpost, false, Normal, nullptr) \
     v(Bool, traceLLIntExecution, false, Configurable, nullptr) \
