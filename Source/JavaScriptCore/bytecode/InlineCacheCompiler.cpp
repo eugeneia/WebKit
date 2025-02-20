@@ -4847,18 +4847,21 @@ AccessGenerationResult InlineCacheCompiler::compile(const GCSafeConcurrentJSLock
     CCallHelpers jit(codeBlock);
     m_jit = &jit;
 
+    if (ASSERT_ENABLED)
+        jit.move(CCallHelpers::stackPointerRegister, jit.scratchRegister());
+
+    m_preservedReusedRegisterState = allocator.preserveReusedRegistersByPushing(jit, ScratchRegisterAllocator::ExtraStackSpace::NoExtraSpace);
+
     if (ASSERT_ENABLED) {
         if (m_stubInfo.useDataIC) {
-            jit.loadPtr(CCallHelpers::Address(GPRInfo::jitDataRegister, BaselineJITData::offsetOfStackOffset()), jit.scratchRegister());
-            jit.addPtr(jit.scratchRegister(), GPRInfo::callFrameRegister, jit.scratchRegister());
+            jit.loadPtr(CCallHelpers::Address(GPRInfo::jitDataRegister, BaselineJITData::offsetOfStackOffset()), m_scratchGPR);
+            jit.addPtr(m_scratchGPR, GPRInfo::callFrameRegister, m_scratchGPR);
         } else
-            jit.addPtr(CCallHelpers::TrustedImm32(codeBlock->stackPointerOffset() * sizeof(Register)), GPRInfo::callFrameRegister, jit.scratchRegister());
-        auto ok = jit.branchPtr(CCallHelpers::Equal, CCallHelpers::stackPointerRegister, jit.scratchRegister());
+            jit.addPtr(CCallHelpers::TrustedImm32(codeBlock->stackPointerOffset() * sizeof(Register)), GPRInfo::callFrameRegister, m_scratchGPR);
+        auto ok = jit.branchPtr(CCallHelpers::Equal, jit.scratchRegister(), m_scratchGPR);
         jit.breakpoint();
         ok.link(&jit);
     }
-
-    m_preservedReusedRegisterState = allocator.preserveReusedRegistersByPushing(jit, ScratchRegisterAllocator::ExtraStackSpace::NoExtraSpace);
 
     if (keys.isEmpty()) {
         // This is super unlikely, but we make it legal anyway.
