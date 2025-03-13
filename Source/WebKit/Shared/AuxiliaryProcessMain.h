@@ -33,6 +33,7 @@
 #include <wtf/NeverDestroyed.h>
 #include <wtf/RunLoop.h>
 #include <wtf/RuntimeApplicationChecks.h>
+#include <wtf/Threading.h>
 
 namespace WebKit {
 
@@ -72,6 +73,9 @@ public:
             return EXIT_FAILURE;
 
         InitializeWebKit2();
+
+        int stackOrigin;
+        Thread::currentSingleton().lowerStackOriginInThread(&stackOrigin);
 
         initializeAuxiliaryProcess(WTFMove(m_parameters));
         RunLoop::run();
