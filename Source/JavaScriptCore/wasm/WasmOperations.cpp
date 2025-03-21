@@ -349,23 +349,23 @@ JSC_DEFINE_JIT_OPERATION(operationWasmToJSExitMarshalArguments, bool, (void* sp,
         case TypeKind::I32: {
             if (wasmParam.isStackArgument()) {
                 uint64_t raw = *access.operator()<uint64_t>(cfr, wasmParam.offsetFromSP() + sizeof(CallerFrameAndPC));
-#if USE(JSVALUE64)
                 if (argType.isI32())
+#if USE(JSVALUE64)
                     *access.operator()<uint64_t>(calleeFrame, dst) = static_cast<uint32_t>(raw) | JSValue::NumberTag;
 #else
-                if (false);
+                    *access.operator()<uint64_t>(calleeFrame, dst) = JSValue::encode(JSValue(static_cast<int32_t>(raw)));
 #endif
                 else
                     *access.operator()<uint64_t>(calleeFrame, dst) = raw;
             } else {
                 auto raw = *access.operator()<uint64_t>(argumentRegisters, GPRInfo::toArgumentIndex(wasmParam.jsr().payloadGPR()) * sizeof(UCPURegister));
-#if USE(JSVALUE64)
                 if (argType.isI32())
+#if USE(JSVALUE64)
                     *access.operator()<uint64_t>(calleeFrame, dst) = static_cast<uint32_t>(raw) | JSValue::NumberTag;
+#else
+                    *access.operator()<uint64_t>(calleeFrame, dst) = JSValue::encode(JSValue(static_cast<int32_t>(raw)));
                 else
                     *access.operator()<uint64_t>(calleeFrame, dst) = raw;
-#else
-                *access.operator()<uint32_t>(calleeFrame, dst) = raw;
 #endif
             }
             break;

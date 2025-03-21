@@ -1102,6 +1102,9 @@ end
 .postcall:
     subp RegisterSpaceScratchSize, sp
     storep r0, [sp]
+if not JSVALUE64
+    storep r1, TagOffset[sp]
+end
 
     loadp WasmCallableFunctionScratch[cfr], a0
     call _operationWasmToJSExitNeedToUnpack
@@ -2010,6 +2013,7 @@ wasmOp(call_indirect, WasmCallIndirect, macro(ctx)
 end)
 
 wasmOp(call_ref, WasmCallRef, macro(ctx)
+    #break
     slowPathForWasmCall(ctx, _slow_path_wasm_call_ref, macro(targetInstance) move targetInstance, wasmInstance end)
 end)
 
